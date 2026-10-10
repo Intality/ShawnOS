@@ -1,0 +1,7 @@
+build/
+*.iso
+*.hdd
+*.elf
+*.log
+.cache/
+
