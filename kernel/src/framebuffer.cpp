@@ -166,20 +166,30 @@ bool draw_welcome(limine_framebuffer *framebuffer) {
     }
 
     const uint64_t center_x = framebuffer->width / 2;
-    const uint64_t center_y = framebuffer->height / 2;
-    const uint64_t logo = framebuffer->height < 700 ? 72 : 96;
-    const uint64_t scale = framebuffer->height < 700 ? 2 : 3;
-    const uint64_t text_x = center_x > 210 ? center_x - 210 : 24;
-    const uint64_t text_y = center_y > 70 ? center_y - 70 : 24;
+    uint64_t scale = framebuffer->height >= 700 ? 3 :
+                     framebuffer->height >= 300 ? 2 : 1;
+    if (framebuffer->width < 120 * scale + 48) {
+        scale = 1;
+    }
+    const uint64_t text_width = 120 * scale;
+    const uint64_t content_height = 74 * scale + 4;
+    const uint64_t text_x = framebuffer->width > text_width ?
+                           (framebuffer->width - text_width) / 2 : 0;
+    const uint64_t top = framebuffer->height > content_height ?
+                         (framebuffer->height - content_height) / 2 : 0;
+    const uint64_t text_y = top + 40 * scale;
+    const uint64_t logo_x = center_x > 15 * scale ? center_x - 15 * scale : 0;
 
-    fill_rect(framebuffer, center_x - logo - 20, text_y - 16, logo, logo, blue);
-    fill_rect(framebuffer, center_x - logo + 6, text_y + 10, logo, logo, green);
-    fill_rect(framebuffer, center_x - logo + 18, text_y + 22, logo / 2, logo / 2, deep);
+    fill_rect(framebuffer, logo_x, top, 24 * scale, 24 * scale, blue);
+    fill_rect(framebuffer, logo_x + 6 * scale, top + 6 * scale,
+              24 * scale, 24 * scale, green);
+    fill_rect(framebuffer, logo_x + 12 * scale, top + 12 * scale,
+              12 * scale, 12 * scale, deep);
 
     draw_text(framebuffer, "MYOS V0.1.0", text_x, text_y, scale, white);
     draw_text(framebuffer, "C++ KERNEL BOOTED", text_x, text_y + 12 * scale, scale, muted);
     draw_text(framebuffer, "LIMINE FRAMEBUFFER OK", text_x, text_y + 23 * scale, scale, muted);
-    fill_rect(framebuffer, text_x, text_y + 34 * scale, 260, 4, line);
+    fill_rect(framebuffer, text_x, text_y + 34 * scale, text_width, 4, line);
 
     return true;
 }

@@ -19,11 +19,11 @@ draw a welcome screen to the framebuffer, and prove first boot in QEMU.
 
 ## Prerequisites
 
-The easiest path on Windows is WSL2 with Ubuntu. Install:
+Use Ubuntu in VirtualBox, WSL2, or a native Linux installation. Install:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y clang lld make curl xorriso qemu-system-x86
+sudo apt-get install -y git build-essential clang lld curl xorriso qemu-system-x86
 ```
 
 You can also use a GCC cross compiler:
@@ -63,6 +63,11 @@ Run the automated first-boot smoke test:
 ```sh
 make smoke TOOLCHAIN=llvm
 ```
+
+The test allows up to 60 seconds for boot and stops as soon as the serial success
+marker appears. For slower machines, use `MYOS_SMOKE_TIMEOUT=120 make smoke`.
+QEMU uses software emulation by default, so running it inside Ubuntu in VirtualBox
+does not require nested virtualization.
 
 The ISO is written to:
 
