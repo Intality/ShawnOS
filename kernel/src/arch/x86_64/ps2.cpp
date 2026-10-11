@@ -51,7 +51,7 @@ bool device_command(uint8_t value, bool auxiliary) {
 
 namespace myos {
 InputDevices input_init() {
-    // IRQs stay masked until the kernel has an IDT. Poll both controller ports.
+    // Device IRQs stay masked; the PIT is enabled separately after PS/2 setup.
     asm volatile("cli");
     myos_outb(0x21, 0xff);
     myos_outb(0xa1, 0xff);
