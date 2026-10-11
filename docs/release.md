@@ -1,7 +1,7 @@
 # Release Process
 
-This project is prepared for GitHub, but no public repository is created or
-pushed automatically. Confirm the GitHub account and repository name first.
+The project repository is [Intality/ShawnOS](https://github.com/Intality/ShawnOS).
+The current kernel and ISO filenames retain the temporary MyOS name.
 
 ## Normal Development Flow
 
@@ -17,24 +17,28 @@ pushed automatically. Confirm the GitHub account and repository name first.
 1. Make sure the changelog describes the release.
 2. Build locally: `make clean && make TOOLCHAIN=llvm`.
 3. Smoke test locally: `make smoke TOOLCHAIN=llvm`.
-4. Tag the release:
+4. Confirm GitHub Actions CI passes for the exact `main` commit to be released.
+5. Tag the release:
 
    ```sh
-   git tag -a v0.1.0 -m "MyOS v0.1.0 first boot"
+   git tag -a v0.1.0 -m "ShawnOS v0.1.0 first boot"
    git push origin main
    git push origin v0.1.0
    ```
 
-5. Create a GitHub release named `MyOS v0.1.0`.
-6. Attach `build/myos-x86_64.iso` from a trusted local or CI build.
+6. Create a GitHub release named `ShawnOS v0.1.0`.
+7. Attach `build/myos-x86_64.iso` from a trusted local or CI build.
 
-## Creating the GitHub Repository Later
+## Working With the Repository
 
-After choosing the account and repository name:
+Clone the existing repository in a new development environment:
 
 ```sh
-git remote add origin git@github.com:ACCOUNT/REPOSITORY.git
-git branch -M main
-git push -u origin main
+git clone https://github.com/Intality/ShawnOS.git
+cd ShawnOS
 ```
+
+For the existing local project, `origin` is already configured. Upload subsequent
+commits with `git push origin main` after completing the normal development flow.
+The ISO is a release asset or CI artifact, not a tracked source file.
 

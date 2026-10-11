@@ -5,6 +5,9 @@ freestanding C++. It is not Debian, not Linux, and not a repackaged distro. The
 v0.1.0 goal is intentionally modest: boot through Limine, enter a C++ kernel,
 draw a welcome screen to the framebuffer, and prove first boot in QEMU.
 
+Repository: [Intality/ShawnOS](https://github.com/Intality/ShawnOS). The kernel,
+boot-screen label, and build artifacts currently use the temporary name MyOS.
+
 ## What Is Included
 
 - Limine boot protocol setup.
@@ -33,6 +36,13 @@ make TOOLCHAIN=gnu TOOLCHAIN_PREFIX=x86_64-elf-
 ```
 
 ## Commands
+
+Get the source:
+
+```sh
+git clone https://github.com/Intality/ShawnOS.git
+cd ShawnOS
+```
 
 Check local tools:
 
@@ -99,6 +109,6 @@ releases. The starter already includes:
 - `docs/roadmap.md`
 - `docs/third_party.md`
 
-No GitHub repository has been created or pushed. Choose the account and final
-repository name before adding a remote.
+The local project uses `https://github.com/Intality/ShawnOS.git` as its `origin`.
+Follow `docs/release.md` to publish a versioned release after CI passes.
 
