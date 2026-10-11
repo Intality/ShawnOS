@@ -26,6 +26,9 @@ jobs:
       - name: Unit tests
         run: make test-host
 
+      - name: Unit memory-safety checks
+        run: make test-host-sanitized
+
       - name: Build bootable ISO
         run: make TOOLCHAIN=llvm
 
@@ -38,12 +41,18 @@ jobs:
       - name: Desktop at 640x480
         run: |
           make iso TOOLCHAIN=llvm ISO=build/myos-640.iso LIMINE_CONFIG=tests/limine-640.conf
-          python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --output-dir build/desktop-test-640
+          python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --memory 128M --output-dir build/desktop-test-640
+
+      - name: CPU exception and panic tests
+        run: make panic-test TOOLCHAIN=llvm
+
+      - name: Interrupt routing and idle regression tests
+        run: make timer-test TOOLCHAIN=llvm
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shawnos-v0.2.0-x86_64-iso
+          name: shawnos-v0.3.1-x86_64-iso
           path: build/myos-x86_64.iso
 
       - name: Upload test evidence
@@ -55,4 +64,15 @@ jobs:
             build/desktop-test/
             build/desktop-test-640/
             build/smoke-serial.log
+            build/panic-tests/**/panic.ppm
+            build/panic-tests/**/serial.log
+            build/panic-tests/**/qemu.log
+            build/panic-tests/**/registers.txt
+            build/panic-tests/result.json
+            build/timer-tests/**/serial.log
+            build/timer-tests/**/qemu.log
+            build/timer-tests/**/registers.txt
+            build/timer-tests/**/failure-*.txt
+            build/timer-tests/**/screen.ppm
+            build/timer-tests/result.json
 

@@ -1,4 +1,4 @@
-# MyOS Roadmap
+# ShawnOS Roadmap
 
 ## v0.1.0 - First Boot
 
@@ -17,13 +17,15 @@
 
 ## v0.3.0 - Kernel Groundwork and Interrupts
 
-- Add a proper panic screen.
-- Add physical memory map parsing.
-- Add a frame allocator.
-- Load a GDT and IDT.
-- Handle CPU exceptions cleanly.
-- Add PIT or HPET timer support.
-- Start documenting architecture decisions in `docs/`.
+- Panic screen and serial exception diagnostics.
+- Validated physical memory map and 4 KiB frame allocator (below 4 GiB).
+- Kernel-owned GDT, IDT, TSS, and emergency exception stacks.
+- CPU exception handling with isolated QEMU fault tests.
+- PIT ticks, `hlt` idle, and visible uptime/memory readings.
+- Architecture decisions in `docs/architecture.md`.
+
+Local implementation and testing precede review, merge, and publication; this
+milestone is not a release until the documented release checks are complete.
 
 ## v0.4.0 - Persistent Apps
 

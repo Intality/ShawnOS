@@ -2,7 +2,7 @@
 .DELETE_ON_ERROR:
 
 PROJECT := MyOS
-VERSION := 0.2.0
+VERSION := 0.3.1
 ARCH := x86_64
 
 BUILD_DIR := build
@@ -14,10 +14,12 @@ LIMINE_DIR := $(BUILD_DIR)/limine-binary
 SMOKE_LOG := $(BUILD_DIR)/smoke-serial.log
 LIMINE_CONFIG ?= limine.conf
 HOST_CXX ?= c++
+HOST_TEST_SOURCES := tests/unit.cpp kernel/src/input_decoder.cpp kernel/src/graphics.cpp kernel/src/memory.cpp
 
 TOOLCHAIN ?= llvm
 TOOLCHAIN_PREFIX ?=
 QEMUFLAGS ?= -m 256M
+QEMU_DISPLAY ?= gtk
 
 ifeq ($(TOOLCHAIN),llvm)
     ifeq ($(origin CXX),default)
@@ -90,11 +92,17 @@ iso: $(ISO)
 
 .PHONY: run
 run: $(ISO)
-	qemu-system-x86_64 -M q35 $(QEMUFLAGS) -cdrom $(ISO) -boot d
+	@echo "Click inside QEMU; use View > Grab Input if needed. Ctrl+Alt+G toggles capture; F1 opens Terminal."
+	qemu-system-x86_64 -M q35 $(QEMUFLAGS) -display $(QEMU_DISPLAY) -cdrom $(ISO) -boot d -serial file:$(BUILD_DIR)/run-serial.log
+
+.PHONY: run-mouse
+run-mouse: $(ISO)
+	@echo "SDL over X11: click inside the window, then Ctrl+Alt+G to toggle capture."
+	SDL_VIDEODRIVER=x11 qemu-system-x86_64 -M q35 $(QEMUFLAGS) -display sdl -cdrom $(ISO) -boot d -serial file:$(BUILD_DIR)/run-serial.log
 
 .PHONY: debug
 debug: $(ISO)
-	qemu-system-x86_64 -M q35 $(QEMUFLAGS) -cdrom $(ISO) -boot d -S -s
+	qemu-system-x86_64 -M q35 $(QEMUFLAGS) -display $(QEMU_DISPLAY) -cdrom $(ISO) -boot d -S -s
 
 .PHONY: smoke
 smoke: $(ISO)
@@ -103,15 +111,29 @@ smoke: $(ISO)
 .PHONY: test-host
 test-host:
 	@mkdir -p $(BUILD_DIR)
-	$(HOST_CXX) -std=c++20 -Wall -Wextra -Werror -Ikernel/include tests/unit.cpp kernel/src/input_decoder.cpp kernel/src/graphics.cpp -o $(BUILD_DIR)/unit-tests
+	$(HOST_CXX) -std=c++20 -Wall -Wextra -Werror -Ikernel/include $(HOST_TEST_SOURCES) -o $(BUILD_DIR)/unit-tests
 	$(BUILD_DIR)/unit-tests
+
+.PHONY: test-host-sanitized
+test-host-sanitized:
+	@mkdir -p $(BUILD_DIR)
+	$(HOST_CXX) -std=c++20 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ikernel/include $(HOST_TEST_SOURCES) -o $(BUILD_DIR)/unit-tests-sanitized
+	$(BUILD_DIR)/unit-tests-sanitized
 
 .PHONY: desktop-test
 desktop-test: $(ISO)
 	python3 scripts/desktop-test.py $(ISO)
 
 .PHONY: test
-test: test-host smoke desktop-test
+test: test-host test-host-sanitized smoke desktop-test panic-test timer-test
+
+.PHONY: panic-test
+panic-test: $(ISO)
+	python3 scripts/panic-test.py
+
+.PHONY: timer-test
+timer-test: $(ISO)
+	python3 scripts/timer-test.py
 
 .PHONY: check-tools
 check-tools:

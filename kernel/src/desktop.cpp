@@ -3,6 +3,8 @@
 #include <myos/input.hpp>
 #include <myos/serial.hpp>
 #include <myos/text_buffer.hpp>
+#include <myos/memory.hpp>
+#include <myos/runtime.hpp>
 
 namespace {
 using namespace myos;
@@ -35,7 +37,7 @@ int wallpaper_style = 0;
 InputDevices devices;
 Canvas canvas;
 
-// Fixed storage until a frame allocator exists. Scene excludes the cursor.
+// Fixed contiguous backing storage; the physical allocator does not provide a heap yet.
 uint32_t background[MAX_SCREEN_WIDTH * MAX_SCREEN_HEIGHT];
 uint32_t scene[MAX_SCREEN_WIDTH * MAX_SCREEN_HEIGHT];
 TextBuffer<2048> note;
@@ -56,8 +58,8 @@ bool starts_with(const char *text, const char *prefix) {
     while (*prefix) { if (*text++ != *prefix++) { return false; } }
     return true;
 }
-void number(unsigned value, char *text) {
-    char reversed[12];
+void number(uint64_t value, char *text) {
+    char reversed[21];
     int count = 0;
     do { reversed[count++] = static_cast<char>('0' + value % 10); value /= 10; } while (value);
     for (int i = 0; i < count; ++i) { text[i] = reversed[count - i - 1]; }
@@ -160,23 +162,66 @@ void terminal_line(const char *text) {
         dest[col] = 0;
     } while (*text);
 }
+void ram_text(uint64_t bytes, char *out) {
+    char digits[21];
+    number(bytes / (1024 * 1024), digits);
+    int at = 0;
+    for (int i = 0; digits[i]; ++i) { out[at++] = digits[i]; }
+    const uint64_t fraction = bytes % (1024 * 1024) * 100 / (1024 * 1024);
+    out[at++] = '.'; out[at++] = '0' + fraction / 10; out[at++] = '0' + fraction % 10;
+    for (const char *unit = " MiB"; *unit; ++unit) { out[at++] = *unit; }
+    out[at] = 0;
+}
+void terminal_stat(const char *label, uint64_t value, const char *unit) {
+    TextBuffer<80> line;
+    char digits[21];
+    number(value, digits);
+    const char *parts[] = {label, digits, unit};
+    for (const char *part : parts) {
+        while (*part) { line.append(*part++); }
+    }
+    terminal_line(line.data);
+}
 void execute_command() {
     terminal_line(command_line.data);
     const char *command = command_line.data;
     if (equal(command, "help")) {
         terminal_line("help  clear  version  echo TEXT");
-        terminal_line("about  notes  wallpaper");
+        terminal_line("about  notes  wallpaper  mem  uptime  cpu");
         serial_write_line("MYOS: command help");
     } else if (equal(command, "clear")) {
         terminal_count = 0;
         serial_write_line("MYOS: command clear");
     } else if (equal(command, "version")) {
-        terminal_line("ShawnOS 0.2.0 / x86-64 / C++");
+        terminal_line("ShawnOS 0.3.1 / x86-64 / C++");
         serial_write_line("MYOS: command version");
     } else if (equal(command, "about")) {
         open_app(About);
     } else if (equal(command, "notes")) {
         open_app(Notes);
+    } else if (equal(command, "mem")) {
+        const auto &frames = physical_frames();
+        terminal_stat("Detected RAM: ", frames.detected_bytes() / 1024, " KiB");
+        terminal_stat("Usable RAM: ", frames.usable_bytes() / 1024, " KiB");
+        terminal_stat("Managed RAM: ", frames.managed_frames() * 4, " KiB");
+        terminal_stat("Free RAM: ", frames.free_frames() * 4, " KiB");
+        serial_write_line("MYOS: command mem");
+    } else if (equal(command, "cpu")) {
+        if (cpu_base_mhz()) { terminal_stat("CPU base: ", cpu_base_mhz(), " MHz"); }
+        else { terminal_line("CPU base: not reported by hardware"); }
+        if (tsc_mhz()) { terminal_stat("TSC clock: ~", tsc_mhz(), " MHz"); }
+        else { terminal_line("TSC clock: unavailable"); }
+        terminal_line("TSC is a clock counter, not live CPU speed.");
+        serial_write_line("MYOS: command cpu");
+    } else if (equal(command, "uptime")) {
+        const uint64_t ticks = timer_ticks();
+        terminal_stat("Uptime: ", ticks / TIMER_HZ, " seconds");
+        terminal_stat("Timer ticks: ", ticks, "");
+        terminal_stat("Idle wakes: ", idle_wakes(), "");
+        char digits[21];
+        serial_write("MYOS: uptime seconds="); number(ticks / TIMER_HZ, digits); serial_write(digits);
+        serial_write(" ticks="); number(ticks, digits); serial_write(digits);
+        serial_write(" idle="); number(idle_wakes(), digits); serial_write_line(digits);
     } else if (equal(command, "wallpaper")) {
         wallpaper_style ^= 1;
         rebuild_background();
@@ -239,17 +284,45 @@ void paint_note(Rect r) {
     canvas.text(count, r.x + 16, r.y + r.h - 16, MUTED, 1);
     canvas.text(note.size == 2047 ? "Full" : "characters", r.x + 54, r.y + r.h - 16, MUTED, 1);
 }
+void paint_about_uptime(Rect r) {
+    const Rect band = {r.x + 136, r.y + 270, r.w - 160, 20};
+    canvas.rect(band, PAPER);
+    const uint64_t seconds = timer_ticks() / TIMER_HZ;
+    char text[21]; number(seconds, text);
+    const int scale = text_width(text) + 96 > band.w ? 1 : 2;
+    canvas.text(text, band.x, band.y, INK, scale, band.w);
+    canvas.text(seconds == 1 ? "second" : "seconds", band.x + text_width(text, scale) + 12, band.y, MUTED, scale);
+}
 void paint_about(Rect r) {
     icon(About, r.x + 24, r.y + 62, 48);
     canvas.text("ShawnOS", r.x + 92, r.y + 64, INK, 3);
-    canvas.text("Version 0.2.0", r.x + 92, r.y + 94, MUTED);
+    canvas.text("Version 0.3.1", r.x + 92, r.y + 94, MUTED);
     canvas.rect({r.x + 24, r.y + 132, r.w - 48, 1}, EDGE);
-    const char *keys[] = {"Kernel", "Boot", "Session", "Input"};
-    const char *values[] = {"C++ / x86-64", "Limine", "RAM only", "PS/2"};
-    for (int i = 0; i < 4; ++i) {
-        canvas.text(keys[i], r.x + 24, r.y + 154 + i * 30, MUTED);
-        canvas.text(values[i], r.x + 136, r.y + 154 + i * 30, INK);
+    char detected_ram[40], free_ram[40], clock[40];
+    ram_text(physical_frames().detected_bytes(), detected_ram);
+    ram_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE, free_ram);
+    const uint64_t mhz = cpu_base_mhz() ? cpu_base_mhz() : tsc_mhz();
+    int at = 0;
+    if (!cpu_base_mhz() && mhz) { clock[at++] = '~'; }
+    if (mhz) {
+        char digits[21]; number(mhz, digits);
+        for (int i = 0; digits[i]; ++i) { clock[at++] = digits[i]; }
+        for (const char *unit = " MHz"; *unit; ++unit) { clock[at++] = *unit; }
+        clock[at] = 0;
+    } else {
+        const char *text = "Unavailable";
+        while (*text) { clock[at++] = *text++; } clock[at] = 0;
     }
+    const char *keys[] = {"Kernel", cpu_base_mhz() ? "CPU base" : "TSC clock", "Detected RAM", "Free RAM", "Timer"};
+    const char *values[] = {"C++ / x86-64", clock, detected_ram, free_ram, "PIT / 100 Hz"};
+    for (int i = 0; i < 5; ++i) {
+        const int y = r.y + 150 + i * 24;
+        const int scale = text_width(values[i]) > r.w - 160 ? 1 : 2;
+        canvas.text(keys[i], r.x + 24, y, MUTED, 1);
+        canvas.text(values[i], r.x + 136, y, INK, scale, r.w - 160);
+
+    }
+    paint_about_uptime(r);
 }
 Rect swatch(Rect r, int style) {
     const int width = (r.w - 64) / 2;
@@ -362,7 +435,7 @@ void render() {
     canvas.rect({0, 0, canvas.width(), 30}, INK);
     canvas.text("ShawnOS", 16, 8, PAPER);
     canvas.text("Desktop", 128, 8, 0xa9c9ba);
-    canvas.text("v0.2.0", canvas.width() - 92, 8, 0xa9c9ba);
+    canvas.text("v0.3.1", canvas.width() - 92, 8, 0xa9c9ba);
     for (int app = 0; app < APP_COUNT; ++app) {
         const Rect button = desktop_button(app);
         if (hover_target() == app) { outline(button, 0xcce6d6); }
@@ -407,11 +480,20 @@ void render() {
     draw_cursor();
 }
 bool mouse_event(const InputEvent &event) {
+    static bool movement_logged = false, click_logged = false;
+    if (!movement_logged && (event.dx || event.dy)) {
+        movement_logged = true;
+        serial_write_line("MYOS: mouse movement received");
+    }
     const int old_x = pointer_x, old_y = pointer_y;
     const int old_hover = hover_target();
     pointer_x = clamp(pointer_x + event.dx, 0, canvas.width() - 1);
     pointer_y = clamp(pointer_y + event.dy, 0, canvas.height() - 1);
     const bool press = event.left && !left_down;
+    if (press && !click_logged) {
+        click_logged = true;
+        serial_write_line("MYOS: mouse click received");
+    }
     const bool release = !event.left && left_down;
     left_down = event.left;
     bool dirty = old_hover != hover_target();
@@ -530,6 +612,7 @@ bool keyboard_event(const InputEvent &event) {
 namespace myos {
 bool desktop_init(limine_framebuffer *framebuffer) {
     if (!canvas.init(framebuffer, scene)) { return false; }
+    panic_attach(&canvas);
     const int w = canvas.width(), h = canvas.height();
     windows[Terminal].bounds = {0, 0, min(580, w - 120), min(350, h - 100)};
     windows[Notes].bounds = {0, 0, min(460, w - 120), min(360, h - 100)};
@@ -546,21 +629,39 @@ bool desktop_init(limine_framebuffer *framebuffer) {
     serial_write_line(devices.keyboard ? "MYOS: keyboard ready" : "MYOS: keyboard unavailable");
     serial_write_line(devices.mouse ? "MYOS: mouse ready" : "MYOS: mouse unavailable");
     rebuild_background();
-    terminal_line("ShawnOS 0.2.0");
+    terminal_line("ShawnOS 0.3.1");
     open_app(About);
     render();
     serial_write_line("MYOS: desktop ready");
     return true;
 }
 [[noreturn]] void desktop_run() {
+    // Clock calibration completes after desktop_init; refresh those initial readings once.
+    render();
+    uint64_t last_second = 0;
+    bool timer_proven = false;
     for (;;) {
         InputEvent event;
-        if (input_poll(event)) {
-            if (event.mouse ? mouse_event(event) : keyboard_event(event)) { render(); }
-        } else {
-            // HLT cannot wake safely before interrupt handlers are installed.
-            asm volatile("pause");
+        const bool input = input_poll(event);
+        bool dirty = input && (event.mouse ? mouse_event(event) : keyboard_event(event));
+        const uint64_t second = timer_ticks() / TIMER_HZ;
+        if (second != last_second) {
+            last_second = second;
+            // Refresh only the unobscured uptime band, avoiding a full-frame redraw.
+            int top = -1;
+            for (int i = APP_COUNT - 1; i >= 0; --i) {
+                if (visible(order[i])) { top = order[i]; break; }
+            }
+            if (!dirty && top == About) {
+                const Rect r = windows[About].bounds;
+                paint_about_uptime(r);
+                canvas.present({r.x + 136, r.y + 270, r.w - 160, 20});
+                draw_cursor();
+            }
+            if (!timer_proven) { timer_proven = true; serial_write_line("MYOS: timer ticked"); }
         }
+        if (dirty) { render(); }
+        if (!input) { idle_wait(); }
     }
 }
 }

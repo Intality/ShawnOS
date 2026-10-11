@@ -2,7 +2,7 @@
 
 ShawnOS is a small independent 64-bit x86-64 operating system written in
 freestanding C++. It is not Debian, not Linux, and not a repackaged distro. The
-v0.2.0 kernel boots through Limine into an interactive framebuffer desktop.
+v0.3.1 kernel boots through Limine into an interactive framebuffer desktop.
 
 Repository: [Intality/ShawnOS](https://github.com/Intality/ShawnOS). Kernel and
 artifact filenames retain the original temporary MyOS name for compatibility.
@@ -16,12 +16,19 @@ artifact filenames retain the original temporary MyOS name for compatibility.
 - Desktop with an original raster mountain wallpaper, launcher, and taskbar.
 - Draggable windows with focus, close, minimize, and restore controls.
 - PS/2 mouse and US-QWERTY keyboard input, including Shift and Caps Lock.
-- Terminal with `help`, `clear`, `version`, `echo`, `about`, `notes`, and `wallpaper`.
+- Terminal with `help`, `clear`, `version`, `echo`, `about`, `notes`, `wallpaper`, `mem`, `uptime`, and `cpu`.
 - Notes editor with typing, newline, backspace, wrapping, and session retention.
 - About and Appearance apps; Alpine and Dusk wallpaper choices.
+- Live uptime and free-memory readings in About; `mem` and `uptime` commands.
+- Kernel-owned GDT, IDT, and TSS with emergency exception stacks.
+- CPU exception diagnostics and a framebuffer panic screen.
+- Validated physical memory map and a tested 4 KiB frame allocator.
+- Approximately 100 Hz PIT timer and `hlt` idle between input checks.
+- APIC/PIC virtual-wire routing and independent, bounded clock calibration.
 - Serial logging for test automation.
 - ISO build, QEMU run, QEMU debug, and QEMU smoke-test targets.
 - Unit tests and QMP-driven desktop interaction tests at 1024x768 and 640x480.
+- QEMU tests for invalid opcode, divide error, page fault, and double fault.
 - GitHub Actions CI that builds the ISO and runs the tests.
 - Release notes and a small incremental roadmap.
 
@@ -67,6 +74,19 @@ Run it in QEMU:
 make run TOOLCHAIN=llvm
 ```
 
+Run/debug use QEMU's GTK display by default. Use `QEMU_DISPLAY=sdl` to choose
+SDL, or `make run-mouse TOOLCHAIN=llvm` for the X11 SDL fallback.
+
+Click inside the QEMU desktop before moving the mouse: the PS/2 mouse needs
+QEMU to capture host input. Ctrl+Alt+G toggles
+mouse and keyboard capture. Press F1 to check keyboard input by opening Terminal.
+If uptime advances but the pointer stays still, check capture first.
+
+If both uptime and input stop, that is not just mouse capture. v0.3.1 configures
+the APIC/PIC delivery path needed to wake the desktop. For VirtualBox, mount the newly built ISO and start
+from Powered Off; resuming a saved state continues the old kernel in memory.
+Use a PS/2 pointing device and keyboard. Guest Additions are not supported.
+
 Run with a debugger waiting on port `1234`:
 
 ```sh
@@ -85,12 +105,39 @@ Run unit tests and automated mouse/keyboard desktop tests:
 make test TOOLCHAIN=llvm
 ```
 
+This includes native AddressSanitizer and UndefinedBehaviorSanitizer checks. Run
+only those checks with `make test-host-sanitized`.
+
 Test the smaller display mode:
 
 ```sh
 make iso TOOLCHAIN=llvm ISO=build/myos-640.iso LIMINE_CONFIG=tests/limine-640.conf
-python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --output-dir build/desktop-test-640
+python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --memory 128M --output-dir build/desktop-test-640
 ```
+
+Run isolated CPU exception tests:
+
+```sh
+make panic-test TOOLCHAIN=llvm
+```
+
+Run interrupt-routing and idle regression tests:
+
+```sh
+make timer-test TOOLCHAIN=llvm
+```
+
+This checks APIC and no-APIC boot, advancing uptime/idle counters, keyboard input,
+repeated fresh boots, boot without a TSC, and spurious interrupt return.
+It is included in `make test`. Its isolated ISOs are not release assets.
+
+An extended boot check is available with `python3 scripts/timer-test.py --boot-repeats 15`.
+Use `--trace-interrupts` to retain CPU interrupt traces when diagnosing a failure.
+
+This creates separate test ISOs under `build/panic-tests/`; the normal ISO has no
+crash-test menu entries. Tests verify the actual CPU exception vector and error
+code, page-fault address, emergency double-fault stack, panic pixels, and halted
+CPU state. Expected panic screens are test successes, not failures.
 
 The desktop test records screenshots, serial output, and a JSON result under
 `build/desktop-test/`. It drives the virtual hardware, not a simulated web UI.
@@ -108,11 +155,17 @@ build/myos-x86_64.iso
 
 ## Code Tour
 
-- `kernel/src/boot.cpp` defines the Limine requests and the `kmain` kernel entry.
+- `kernel/src/boot.cpp` defines the Limine requests and the `kmain` kernel entry,
+  validates boot memory, and checks allocation with real physical page writes.
 - `kernel/src/graphics.cpp` clips drawing, renders the built-in bitmap font,
   handles RGB masks and pitch, and copies pixels to Limine's framebuffer.
 - `kernel/src/desktop.cpp` owns the desktop, window stacking, apps, input loop,
-  wallpaper, and cursor. Fixed backing buffers avoid needing an allocator yet.
+  wallpaper, and cursor. Its contiguous backing buffers remain statically sized.
+- `kernel/src/memory.cpp` manages usable 4 KiB physical frames; the same allocator
+  is tested natively for exhaustion, alignment, reservations, and invalid frees.
+- `kernel/src/arch/x86_64/interrupts.cpp` owns descriptor tables, exception stacks,
+  PIC setup, and PIT ticks. `interrupts.S` preserves registers across interrupts.
+- `kernel/src/panic.cpp` reports fatal exceptions to COM1 and the framebuffer.
 - `kernel/src/arch/x86_64/ps2.cpp` initializes the PS/2 controller and polls input.
 - `kernel/src/input_decoder.cpp` decodes key scan codes and mouse packets;
   the exact same decoder is covered by host unit tests.
@@ -132,7 +185,20 @@ click its taskbar icon to restore it. The cross closes the window.
 F1 opens Terminal, F2 Notes, F3 About, and F4 Appearance. Tab cycles visible
 windows. Escape dismisses the launcher or closes the focused window. Notes is an
 append-only editor with Backspace and Enter; text survives closing the window,
-but not rebooting. QEMU's default mouse capture can be released with Ctrl+Alt.
+but not rebooting. QEMU's default GTK window offers View > Grab Input;
+Ctrl+Alt+G toggles capture.
+
+If the physical mouse does not move the guest cursor on Ubuntu, click inside
+the QEMU window and press Ctrl+Alt+G to toggle capture. On a Wayland session,
+the default GTK backend delivers physical mouse movement on the tested host,
+where SDL over X11 delivered clicks but no motion. As an alternate backend,
+try `make run-mouse TOOLCHAIN=llvm` to use SDL through X11/XWayland.
+This requires an available X11 display and QEMU's SDL backend. Normal `make run`
+and `make run-mouse` save boot and input diagnostics to `build/run-serial.log`.
+`mouse ready` confirms device initialization; `mouse movement received` and
+`mouse click received` confirm that actual input reached the desktop. Automated
+QMP tests bypass host capture, so passing those tests cannot verify a physical
+mouse. ShawnOS currently supports PS/2 input; do not add a USB tablet device.
 
 ## Current Limits
 
@@ -143,11 +209,16 @@ Terminal commands are built-ins, not Linux programs. Notes has a 2047-character
 RAM limit. Desktop resolutions supported are 640x480 through 1920x1200, RGB32;
 the normal ISO requests 1024x768.
 
-Input uses bounded PS/2 controller polling with interrupts masked. Without an
-IDT and timer yet, idle uses `pause`, not `hlt`, and may keep a CPU core busy.
-The next kernel work is exception handling, interrupts, memory allocation, and
-persistent storage. Real hardware, UEFI input, and live debugging require
-separate verification.
+Input still uses bounded PS/2 polling; only the timer IRQ is enabled. The CPU
+sleeps with `hlt` when input is exhausted and wakes approximately every 10 ms.
+The timer is not a wall clock and does not schedule processes. The frame
+allocator manages usable RAM below 4 GiB, never bootloader, kernel, ACPI, or
+framebuffer reservations; `mem` distinguishes reported usable RAM from managed
+RAM. Physical frame allocation is not a C++ heap or a user-process memory system.
+Exceptions stop the session, so unsaved Notes text is lost on restart. Very early
+boot failures before framebuffer setup report only to serial. See
+`docs/architecture.md` for initialization order and the remaining constraints.
+Real hardware, UEFI input, SMP, and live debugging require separate verification.
 
 ## Development Practice
 
@@ -164,3 +235,19 @@ releases. The starter already includes:
 The local project uses `https://github.com/Intality/ShawnOS.git` as its `origin`.
 Follow `docs/release.md` to publish a versioned release after CI passes.
 
+
+## Hardware Readings
+
+About shows detected and free RAM in MiB with two decimal places. Detected RAM
+is the union of RAM regions identified in Limine's map: usable RAM, kernel/modules,
+bootloader memory, and ACPI memory. Ambiguous reserved ranges and MMIO are excluded,
+so it can be slightly below configured or installed capacity. `mem` reports exact
+whole-KiB detected, usable, managed, and free counts, including detected RAM above
+the allocator's 4 GiB ceiling.
+
+`cpu` reports the CPU's base frequency when CPUID leaf 0x16 provides it. This is
+not a live turbo frequency. The TSC clock is measured against a PIT channel 2 interval at boot
+and shown with `~`; About uses it only when CPU base frequency is unavailable.
+Virtual machines may hide CPU frequency or virtualize their timestamp counter.
+The TSC reading is a clock-counter rate, not CPU execution speed or host speed.
+The separately labeled PIT / 100 Hz reading is the system timer frequency.

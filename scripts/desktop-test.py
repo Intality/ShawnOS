@@ -73,6 +73,7 @@ def main():
     parser.add_argument("iso", nargs="?", default="build/myos-x86_64.iso")
     parser.add_argument("--output-dir", default="build/desktop-test")
     parser.add_argument("--expect-size", default="1024x768")
+    parser.add_argument("--memory", default="256M")
     args = parser.parse_args()
     total_timeout = int(os.environ.get("MYOS_DESKTOP_TIMEOUT", "180"))
     if total_timeout <= 0:
@@ -92,7 +93,7 @@ def main():
     import tempfile
     with tempfile.TemporaryDirectory(prefix="myos-qmp-") as temp, (output / "qemu.log").open("w") as error_log:
         process = subprocess.Popen([
-            "qemu-system-x86_64", "-M", "q35", "-m", "256M", "-cdrom", str(iso),
+            "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-cdrom", str(iso),
             "-boot", "d", "-display", "none", "-serial", f"file:{serial}",
             "-qmp", f"unix:{temp}/qmp,server=on,wait=off", "-no-reboot", "-no-shutdown",
         ], stdout=subprocess.DEVNULL, stderr=error_log)
@@ -106,7 +107,7 @@ def main():
             def wait_marker(marker, count=1):
                 deadline = time.monotonic() + float(os.environ.get("MYOS_SMOKE_TIMEOUT", "60"))
                 while log().count(marker) < count:
-                    if process.poll() is not None or time.monotonic() > deadline:
+                    if process.poll() is not None or "MYOS: panic halted" in log() or time.monotonic() > deadline:
                         raise RuntimeError(f"Missing marker: {marker}\n{log()}")
                     time.sleep(0.1)
 
@@ -130,7 +131,12 @@ def main():
                     else:
                         key(punctuation.get(char, char))
 
-            wait_marker("MYOS: boot ok v0.2.0")
+            wait_marker("MYOS: boot ok v0.3.1")
+            wait_marker("MYOS: GDT IDT TSS ready")
+            wait_marker("MYOS: memory map ready")
+            wait_marker("MYOS: frame allocator self-test passed")
+            wait_marker("MYOS: PIT ready 100 Hz")
+            wait_marker("MYOS: timer ticked")
             wait_marker("MYOS: desktop ready")
             wait_marker("MYOS: keyboard ready")
             wait_marker("MYOS: mouse ready")
@@ -147,6 +153,18 @@ def main():
             assert pixel(pixels, width - 1, height - 1) == bytes.fromhex("f5f8f6"), "Missing taskbar"
             assert len({pixels[i:i + 3] for i in range(0, len(pixels), 3)}) >= 15, "Blank framebuffer"
             position = [width * 3 // 4, height * 3 // 4]
+
+            def region(image, x, y, w, h):
+                return b"".join(image[((y + row) * width + x) * 3:((y + row) * width + x + w) * 3]
+                                for row in range(h))
+
+            about_x = (width - 420) // 2
+            about_y = max(32, min(height - 48 - 300 - 4, (height - 48 - 300) // 2 + 12))
+            uptime_before = screenshot("uptime-before")[2]
+            time.sleep(1.2)
+            uptime_after = screenshot("uptime-after")[2]
+            assert region(uptime_before, about_x + 136, about_y + 270, 180, 16) != region(
+                uptime_after, about_x + 136, about_y + 270, 180, 16), "Uptime did not refresh"
 
             def move_to(x, y):
                 while position != [x, y]:
@@ -184,20 +202,38 @@ def main():
             type_text("echo desktop-ready\n")
             wait_marker("MYOS: command echo")
             assert screenshot("terminal")[2] != before_echo, "Terminal output did not render"
+            type_text("cpu\n")
+            wait_marker("MYOS: command cpu")
+            type_text("mem\n")
+            wait_marker("MYOS: command mem")
+            type_text("uptime\n")
+            time.sleep(1.1)
+            type_text("uptime\n")
+            uptime_samples = re.findall(r"MYOS: uptime seconds=(\d+) ticks=(\d+) idle=(\d+)", log())
+            assert len(uptime_samples) == 2, log()
+            first, second = [tuple(map(int, sample)) for sample in uptime_samples]
+            assert second[0] > first[0] and second[1] > first[1] and second[2] > first[2] > 0, "Timer or idle did not progress"
+            screenshot("system-info")
             key("f2")
             wait_marker("MYOS: open Notes")
             print("Terminal passed; checking Notes and window controls.", flush=True)
             blank_note = screenshot("notes-blank")[2]
+            note_w, note_h = min(460, width - 120), min(360, height - 100)
+            note_x = max(0, min(width - note_w - 4, (width - note_w) // 2 - 24))
+            note_y = max(32, min(height - 48 - note_h - 4, (height - 48 - note_h) // 2 + 12))
             type_text("Hello Desktop\nline 2!")
             wait_marker("MYOS: note edited")
             written_note = screenshot("notes")[2]
-            assert sum(a != b for a, b in zip(blank_note, written_note)) > 250, "Notes did not render typing"
+            assert sum(a != b for a, b in zip(region(blank_note, note_x, note_y, note_w, note_h),
+                region(written_note, note_x, note_y, note_w, note_h))) > 250, "Notes did not render typing"
             key("backspace")
             edited_note = screenshot("notes-edited")[2]
-            assert edited_note != written_note, "Backspace did not edit Notes"
+            assert region(edited_note, note_x, note_y, note_w, note_h) != region(
+                written_note, note_x, note_y, note_w, note_h), "Backspace did not edit Notes"
             key("esc")
             key("f2")
-            assert screenshot("notes-restored")[2] == edited_note, "Closing Notes lost session text"
+            assert region(screenshot("notes-restored")[2], note_x, note_y, note_w, note_h) == region(
+                edited_note, note_x, note_y, note_w, note_h), "Closing Notes lost session text"
 
             note_w, note_h = min(460, width - 120), min(360, height - 100)
             note_x = max(0, min(width - note_w - 4, (width - note_w) // 2 - 24))
@@ -234,9 +270,10 @@ def main():
             assert pixel(sky_before, width - 4, 50) != pixel(sky_after, width - 4, 50), "Wallpaper did not change"
             qmp.execute("quit")
             process.wait(timeout=10)
-            result = {"version": "0.2.0", "resolution": args.expect_size, "result": "passed",
+            result = {"version": "0.3.1", "resolution": args.expect_size, "memory": args.memory, "result": "passed",
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
-                                 "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper"],
+                                 "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
+                                 "frame allocator boot self-test", "live uptime", "memory command", "timer and HLT wake progress"],
                       "iso_sha256": hashlib.sha256(iso.read_bytes()).hexdigest()}
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print(json.dumps(result, indent=2))
@@ -244,6 +281,9 @@ def main():
             if qmp is not None and process.poll() is None:
                 try:
                     qmp.execute("screendump", filename=str(output / "failure.ppm"))
+                    for info in ["registers", "pic", "lapic", "irq"]:
+                        diagnostic = qmp.execute("human-monitor-command", **{"command-line": f"info {info}"})
+                        (output / f"failure-{info}.txt").write_text(diagnostic)
                 except Exception:
                     pass
             print(log() if qmp is not None else "QMP connection failed")
