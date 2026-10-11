@@ -7,23 +7,29 @@
 - Welcome screen and serial smoke-test marker.
 - Bootable ISO build path.
 
-## v0.2.0 - Early Kernel Groundwork
+## v0.2.0 - Interactive Kernel Desktop
+
+- Framebuffer desktop, launcher, taskbar, and original wallpaper.
+- Polling PS/2 keyboard and mouse input.
+- Movable windows, focus, minimize, restore, and close.
+- Built-in Terminal, session Notes, About, and Appearance apps.
+- Host tests and QEMU input/screenshot integration tests.
+
+## v0.3.0 - Kernel Groundwork and Interrupts
 
 - Add a proper panic screen.
 - Add physical memory map parsing.
 - Add a frame allocator.
-- Add a basic text console abstraction.
-
-## v0.3.0 - Interrupts and Time
-
 - Load a GDT and IDT.
 - Handle CPU exceptions cleanly.
 - Add PIT or HPET timer support.
 - Start documenting architecture decisions in `docs/`.
 
-## v0.4.0 - Keyboard and Shell Seed
+## v0.4.0 - Persistent Apps
 
-- Add PS/2 keyboard input.
-- Add a tiny command loop.
-- Add more QEMU smoke tests.
+- Add a block driver and a small filesystem.
+- Save and load Notes documents.
+- Add memory allocation and a foundation for isolated user processes.
+- Move input and idle handling from polling to interrupts.
+- Add more QEMU storage and exception tests.
 

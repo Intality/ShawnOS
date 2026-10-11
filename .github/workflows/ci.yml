@@ -10,6 +10,7 @@ permissions:
 jobs:
   build-and-smoke-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -17,10 +18,13 @@ jobs:
       - name: Install OS development tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld make curl xorriso qemu-system-x86
+          sudo apt-get install -y build-essential clang lld make curl xorriso qemu-system-x86 python3
 
       - name: Check tools
         run: make check-tools
+
+      - name: Unit tests
+        run: make test-host
 
       - name: Build bootable ISO
         run: make TOOLCHAIN=llvm
@@ -28,9 +32,27 @@ jobs:
       - name: Smoke test in QEMU
         run: make smoke TOOLCHAIN=llvm
 
+      - name: Desktop interaction tests
+        run: make desktop-test TOOLCHAIN=llvm
+
+      - name: Desktop at 640x480
+        run: |
+          make iso TOOLCHAIN=llvm ISO=build/myos-640.iso LIMINE_CONFIG=tests/limine-640.conf
+          python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --output-dir build/desktop-test-640
+
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myos-v0.1.0-x86_64-iso
+          name: shawnos-v0.2.0-x86_64-iso
           path: build/myos-x86_64.iso
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-evidence
+          path: |
+            build/desktop-test/
+            build/desktop-test-640/
+            build/smoke-serial.log
 
