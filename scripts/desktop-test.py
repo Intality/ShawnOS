@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -73,6 +74,15 @@ def main():
     parser.add_argument("--output-dir", default="build/desktop-test")
     parser.add_argument("--expect-size", default="1024x768")
     args = parser.parse_args()
+    total_timeout = int(os.environ.get("MYOS_DESKTOP_TIMEOUT", "180"))
+    if total_timeout <= 0:
+        parser.error("MYOS_DESKTOP_TIMEOUT must be a positive number of seconds")
+
+    def timed_out(_signal, _frame):
+        raise TimeoutError("Desktop interaction test exceeded its total time limit")
+
+    signal.signal(signal.SIGALRM, timed_out)
+    signal.alarm(total_timeout)
     output = Path(args.output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     iso = Path(args.iso).resolve()
@@ -125,6 +135,7 @@ def main():
             wait_marker("MYOS: keyboard ready")
             wait_marker("MYOS: mouse ready")
             width, height, pixels = screenshot("desktop")
+            print(f"Desktop booted at {width}x{height}; checking mouse and keyboard.", flush=True)
             expected = tuple(map(int, args.expect_size.split("x")))
             assert (width, height) == expected, (width, height, expected)
 
@@ -166,6 +177,7 @@ def main():
             assert pixel(tooltip, 44, height - 72) == bytes.fromhex("243531"), "Missing taskbar tooltip"
             click(64, 85)
             wait_marker("MYOS: open Terminal")
+            print("Mouse launcher passed; checking Terminal.", flush=True)
             type_text("help\n")
             wait_marker("MYOS: command help")
             before_echo = screenshot("terminal-help")[2]
@@ -174,6 +186,7 @@ def main():
             assert screenshot("terminal")[2] != before_echo, "Terminal output did not render"
             key("f2")
             wait_marker("MYOS: open Notes")
+            print("Terminal passed; checking Notes and window controls.", flush=True)
             blank_note = screenshot("notes-blank")[2]
             type_text("Hello Desktop\nline 2!")
             wait_marker("MYOS: note edited")
@@ -208,6 +221,7 @@ def main():
 
             click(32, height - 24)
             wait_marker("MYOS: launcher opened")
+            print("Window controls passed; checking launcher and wallpaper.", flush=True)
             screenshot("launcher")
             click(110, height - 48 - 256 + 48 + 3 * 46 + 21)
             wait_marker("MYOS: open Appearance")
@@ -235,6 +249,7 @@ def main():
             print(log() if qmp is not None else "QMP connection failed")
             raise
         finally:
+            signal.alarm(0)
             if qmp is not None:
                 qmp.close()
             if process.poll() is None:
