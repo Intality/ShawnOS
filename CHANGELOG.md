@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.1 - VirtualBox Timer Compatibility (Unreleased)
+## v0.3.1 - VirtualBox Timer Compatibility (2026-10-11)
 
 - Keep the local APIC enabled and configure LINT0 ExtINT virtual-wire delivery
   for the legacy PIC instead of relying on disabling IA32_APIC_BASE.
@@ -16,7 +16,7 @@
   optional CPU interrupt tracing. Retain hardware diagnostics on desktop-test failures.
 - Retain all v0.3.0 kernel groundwork and desktop functionality.
 
-## v0.3.0 - Kernel Groundwork and Interrupts (Unreleased)
+## v0.3.0 - Kernel Groundwork and Interrupts (Included in v0.3.1)
 
 - Install a kernel-owned GDT, IDT, and TSS, preserving registers and stack alignment.
 - Handle CPU exceptions with serial diagnostics and a framebuffer panic screen.
