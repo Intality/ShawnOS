@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #include <limine.h>
-#include <myos/framebuffer.hpp>
+#include <myos/desktop.hpp>
 #include <myos/serial.hpp>
 
 extern "C" void myos_halt_forever();
@@ -53,20 +53,14 @@ extern "C" void kmain() {
         myos_halt_forever();
     }
 
-    bool drew_screen = false;
     for (uint64_t i = 0; i < framebuffer_request.response->framebuffer_count; ++i) {
         limine_framebuffer *framebuffer = framebuffer_request.response->framebuffers[i];
-        if (myos::draw_welcome(framebuffer)) {
-            drew_screen = true;
+        if (myos::desktop_init(framebuffer)) {
+            myos::serial_write_line("MYOS: boot ok v0.2.0");
+            myos::desktop_run();
         }
     }
-
-    if (!drew_screen) {
-        myos::serial_write_line("MYOS: no supported 32-bit RGB framebuffer");
-        myos_halt_forever();
-    }
-
-    myos::serial_write_line("MYOS: boot ok v0.1.0");
+    myos::serial_write_line("MYOS: unsupported framebuffer: need 640x480 through 1920x1200, RGB32");
     myos_halt_forever();
 }
 

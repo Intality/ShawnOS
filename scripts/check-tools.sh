@@ -17,6 +17,8 @@ need gunzip
 need timeout
 need xorriso
 need qemu-system-x86_64
+need python3
+need c++
 
 if command -v clang++ >/dev/null 2>&1; then
     :

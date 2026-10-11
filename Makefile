@@ -2,7 +2,7 @@
 .DELETE_ON_ERROR:
 
 PROJECT := MyOS
-VERSION := 0.1.0
+VERSION := 0.2.0
 ARCH := x86_64
 
 BUILD_DIR := build
@@ -12,6 +12,8 @@ ISO_ROOT := $(BUILD_DIR)/iso_root
 LIMINE_TARBALL := $(BUILD_DIR)/limine-binary.tar.gz
 LIMINE_DIR := $(BUILD_DIR)/limine-binary
 SMOKE_LOG := $(BUILD_DIR)/smoke-serial.log
+LIMINE_CONFIG ?= limine.conf
+HOST_CXX ?= c++
 
 TOOLCHAIN ?= llvm
 TOOLCHAIN_PREFIX ?=
@@ -98,6 +100,19 @@ debug: $(ISO)
 smoke: $(ISO)
 	sh scripts/smoke-test.sh $(ISO) $(SMOKE_LOG)
 
+.PHONY: test-host
+test-host:
+	@mkdir -p $(BUILD_DIR)
+	$(HOST_CXX) -std=c++20 -Wall -Wextra -Werror -Ikernel/include tests/unit.cpp kernel/src/input_decoder.cpp kernel/src/graphics.cpp -o $(BUILD_DIR)/unit-tests
+	$(BUILD_DIR)/unit-tests
+
+.PHONY: desktop-test
+desktop-test: $(ISO)
+	python3 scripts/desktop-test.py $(ISO)
+
+.PHONY: test
+test: test-host smoke desktop-test
+
 .PHONY: check-tools
 check-tools:
 	sh scripts/check-tools.sh
@@ -123,11 +138,11 @@ $(LIMINE_DIR)/limine: $(LIMINE_TARBALL)
 	gunzip < $(LIMINE_TARBALL) | tar -xf - -C $(BUILD_DIR)
 	$(MAKE) -C $(LIMINE_DIR)
 
-$(ISO): $(KERNEL) $(LIMINE_DIR)/limine limine.conf
+$(ISO): $(KERNEL) $(LIMINE_DIR)/limine $(LIMINE_CONFIG)
 	@rm -rf $(ISO_ROOT)
 	@mkdir -p $(ISO_ROOT)/boot/limine $(ISO_ROOT)/EFI/BOOT
 	cp $(KERNEL) $(ISO_ROOT)/boot/myos.elf
-	cp limine.conf $(ISO_ROOT)/boot/limine/
+	cp $(LIMINE_CONFIG) $(ISO_ROOT)/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_ROOT)/boot/limine/
 	cp $(LIMINE_DIR)/limine-bios-cd.bin $(ISO_ROOT)/boot/limine/
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(ISO_ROOT)/boot/limine/

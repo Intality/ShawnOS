@@ -47,8 +47,8 @@ timeout "${boot_timeout}s" qemu-system-x86_64 \
 qemu_pid=$!
 
 while kill -0 "$qemu_pid" 2>/dev/null; do
-    if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.1.0' "$log"; then
-        printf 'Smoke test passed: kernel reached first boot marker.\n'
+    if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.2.0' "$log" && grep -q 'MYOS: desktop ready' "$log"; then
+        printf 'Smoke test passed: kernel reached the desktop.\n'
         exit 0
     fi
     sleep 1
@@ -64,8 +64,8 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     exit "$status"
 fi
 
-if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.1.0' "$log"; then
-    printf 'Smoke test passed: kernel reached first boot marker.\n'
+if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.2.0' "$log" && grep -q 'MYOS: desktop ready' "$log"; then
+    printf 'Smoke test passed: kernel reached the desktop.\n'
 else
     printf 'Smoke test failed: boot marker not found in serial log.\n' >&2
     test -f "$log" && cat "$log" >&2
