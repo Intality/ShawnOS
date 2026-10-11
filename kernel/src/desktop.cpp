@@ -302,9 +302,21 @@ void paint_launcher() {
 }
 int hover_target() {
     if (launcher && launcher_bounds().contains(pointer_x, pointer_y)) {
-        return 20 + (pointer_y - launcher_bounds().y - 48) / 46;
+        const Rect menu = launcher_bounds();
+        for (int app = 0; app < APP_COUNT; ++app) {
+            if (Rect{menu.x + 8, menu.y + 48 + app * 46, menu.w - 16, 42}.contains(pointer_x, pointer_y)) {
+                return 20 + app;
+            }
+        }
+        return 24;
     }
-    if (pointer_y >= canvas.height() - PANEL) { return 30 + pointer_x / 48; }
+    if (pointer_y >= canvas.height() - PANEL) {
+        if (Rect{12, canvas.height() - PANEL + 6, 40, 36}.contains(pointer_x, pointer_y)) { return 30; }
+        for (int app = 0; app < APP_COUNT; ++app) {
+            if (task_button(app).contains(pointer_x, pointer_y)) { return 31 + app; }
+        }
+        return 35;
+    }
     for (int i = APP_COUNT - 1; i >= 0; --i) {
         const int app = order[i];
         if (visible(app) && windows[app].bounds.contains(pointer_x, pointer_y)) {

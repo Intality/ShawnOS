@@ -158,6 +158,12 @@ def main():
                 button(True)
                 button(False)
 
+            move_to(64, height - 24)
+            no_tooltip = screenshot("taskbar-neutral")[2]
+            move_to(74, height - 24)
+            tooltip = screenshot("taskbar-hover")[2]
+            assert pixel(no_tooltip, 44, height - 72) != pixel(tooltip, 44, height - 72), "Taskbar hover did not update"
+            assert pixel(tooltip, 44, height - 72) == bytes.fromhex("243531"), "Missing taskbar tooltip"
             click(64, 85)
             wait_marker("MYOS: open Terminal")
             type_text("help\n")
@@ -215,7 +221,7 @@ def main():
             qmp.execute("quit")
             process.wait(timeout=10)
             result = {"version": "0.2.0", "resolution": args.expect_size, "result": "passed",
-                      "checks": ["desktop pixels", "PS/2 mouse launch", "terminal commands", "typing",
+                      "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper"],
                       "iso_sha256": hashlib.sha256(iso.read_bytes()).hexdigest()}
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
