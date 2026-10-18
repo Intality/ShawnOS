@@ -5,6 +5,7 @@
 #include <myos/text_buffer.hpp>
 #include <myos/memory.hpp>
 #include <myos/runtime.hpp>
+#include <myos/cpu.hpp>
 
 namespace {
 using namespace myos;
@@ -207,8 +208,14 @@ void execute_command() {
         terminal_stat("Free RAM: ", frames.free_frames() * 4, " KiB");
         serial_write_line("MYOS: command mem");
     } else if (equal(command, "cpu")) {
-        if (cpu_base_mhz()) { terminal_stat("CPU base: ", cpu_base_mhz(), " MHz"); }
-        else { terminal_line("CPU base: not reported by hardware"); }
+        const auto frequency = cpu_frequency();
+        const auto speed = cpu_frequency_text(frequency.mhz);
+        TextBuffer<64> info;
+        for (const char *c = frequency.label(); *c; ++c) info.append(*c);
+        info.append(':'); info.append(' ');
+        for (const char *c = speed.data; *c; ++c) info.append(*c);
+        terminal_line(info.data);
+        serial_write("MYOS: "); serial_write_line(info.data);
         if (tsc_mhz()) { terminal_stat("TSC clock: ~", tsc_mhz(), " MHz"); }
         else { terminal_line("TSC clock: unavailable"); }
         terminal_line("TSC is a clock counter, not live CPU speed.");
@@ -298,23 +305,13 @@ void paint_about(Rect r) {
     canvas.text("ShawnOS", r.x + 92, r.y + 64, INK, 3);
     canvas.text("Version 0.3.1", r.x + 92, r.y + 94, MUTED);
     canvas.rect({r.x + 24, r.y + 132, r.w - 48, 1}, EDGE);
-    char detected_ram[40], free_ram[40], clock[40];
+    char detected_ram[40], free_ram[40];
     ram_text(physical_frames().detected_bytes(), detected_ram);
     ram_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE, free_ram);
-    const uint64_t mhz = cpu_base_mhz() ? cpu_base_mhz() : tsc_mhz();
-    int at = 0;
-    if (!cpu_base_mhz() && mhz) { clock[at++] = '~'; }
-    if (mhz) {
-        char digits[21]; number(mhz, digits);
-        for (int i = 0; digits[i]; ++i) { clock[at++] = digits[i]; }
-        for (const char *unit = " MHz"; *unit; ++unit) { clock[at++] = *unit; }
-        clock[at] = 0;
-    } else {
-        const char *text = "Unavailable";
-        while (*text) { clock[at++] = *text++; } clock[at] = 0;
-    }
-    const char *keys[] = {"Kernel", cpu_base_mhz() ? "CPU base" : "TSC clock", "Detected RAM", "Free RAM", "Timer"};
-    const char *values[] = {"C++ / x86-64", clock, detected_ram, free_ram, "PIT / 100 Hz"};
+    const auto frequency = cpu_frequency();
+    const auto speed = cpu_frequency_text(frequency.mhz);
+    const char *keys[] = {"Kernel", frequency.label(), "Detected RAM", "Free RAM", "Timer"};
+    const char *values[] = {"C++ / x86-64", speed.data, detected_ram, free_ram, "PIT / 100 Hz"};
     for (int i = 0; i < 5; ++i) {
         const int y = r.y + 150 + i * 24;
         const int scale = text_width(values[i]) > r.w - 160 ? 1 : 2;

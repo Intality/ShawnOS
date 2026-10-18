@@ -109,6 +109,18 @@ struct limine_executable_cmdline_request {
     LIMINE_PTR(struct limine_executable_cmdline_response *) response;
 };
 
+#define LIMINE_SMBIOS_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x9e9046f11e095391, 0xaa4a520fefbde5ee }
+struct limine_smbios_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) entry_32;
+    LIMINE_PTR(void *) entry_64;
+};
+struct limine_smbios_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_smbios_response *) response;
+};
+
 #ifdef __cplusplus
 }
 #endif

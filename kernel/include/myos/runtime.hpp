@@ -1,6 +1,7 @@
 #ifndef MYOS_RUNTIME_HPP
 #define MYOS_RUNTIME_HPP
 #include <stdint.h>
+#include <myos/cpu.hpp>
 
 namespace myos {
 class Canvas;
@@ -11,8 +12,8 @@ struct InterruptFrame {
 constexpr uint64_t TIMER_HZ = 100;
 void interrupts_init();
 void timer_start(uint64_t direct_map_offset);
-void clock_init();
-uint64_t cpu_base_mhz();
+void clock_init(uint64_t firmware_mhz = 0);
+CpuFrequency cpu_frequency();
 uint64_t tsc_mhz();
 uint64_t timer_ticks();
 uint64_t idle_wakes();

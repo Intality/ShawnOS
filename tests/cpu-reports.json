@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "cases": [
+    {"name": "intel-base-priority", "cpu": "max,vendor=GenuineIntel,model-id=Test CPU @ 2.40GHz", "firmware_mhz": 3600, "expected": "2.40 GHz", "label": "CPU base speed", "entry": "64"},
+    {"name": "amd-k8-800", "cpu": "Opteron_G1", "firmware_mhz": 800, "expected": "800 MHz", "label": "CPU boot speed", "entry": "32"},
+    {"name": "amd-epyc-3600", "cpu": "EPYC", "firmware_mhz": 3600, "expected": "3.60 GHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "intel-firmware", "cpu": "Nehalem", "firmware_mhz": 1800, "expected": "1.80 GHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "centaur-999", "cpu": "max,vendor=CentaurHauls", "firmware_mhz": 999, "expected": "999 MHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "zhaoxin-1000", "cpu": "max,vendor=  Shanghai  ", "firmware_mhz": 1000, "expected": "1.00 GHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "hygon-3200", "cpu": "Dhyana-v1", "firmware_mhz": 3200, "expected": "3.20 GHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "unknown-vendor", "cpu": "max,vendor=MysteryCPU12", "firmware_mhz": 4100, "expected": "4.10 GHz", "label": "CPU boot speed", "entry": "64"},
+    {"name": "missing-frequency", "cpu": "qemu64", "firmware_mhz": 0, "expected": "Unavailable", "label": "CPU base speed", "entry": "64"}
+  ]
+}

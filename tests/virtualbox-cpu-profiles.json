@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "profiles": [
+    {"name": "800mhz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 0.80GHz", "expected": "800 MHz"},
+    {"name": "999mhz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 0.999GHz", "expected": "999 MHz"},
+    {"name": "1000mhz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 1.00GHz", "expected": "1.00 GHz"},
+    {"name": "3600mhz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 3.60GHz", "expected": "3.60 GHz"},
+    {"name": "brand-ghz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 1.80GHz", "expected": "1.80 GHz"},
+    {"name": "brand-mhz", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 800MHz", "expected": "800 MHz"},
+    {"name": "unavailable", "vendor": "GenuineIntel", "base_mhz": 0, "brand": "ShawnOS Test CPU", "expected": "Unavailable"},
+    {"name": "amd-no-firmware", "vendor": "AuthenticAMD", "base_mhz": 0, "brand": "ShawnOS Test CPU @ 3.60GHz", "expected": "Unavailable"}
+  ]
+}
