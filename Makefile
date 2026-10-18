@@ -14,7 +14,7 @@ LIMINE_DIR := $(BUILD_DIR)/limine-binary
 SMOKE_LOG := $(BUILD_DIR)/smoke-serial.log
 LIMINE_CONFIG ?= limine.conf
 HOST_CXX ?= c++
-HOST_TEST_SOURCES := tests/unit.cpp kernel/src/input_decoder.cpp kernel/src/graphics.cpp kernel/src/memory.cpp
+HOST_TEST_SOURCES := tests/unit.cpp kernel/src/input_decoder.cpp kernel/src/graphics.cpp kernel/src/memory.cpp kernel/src/smbios.cpp
 
 TOOLCHAIN ?= llvm
 TOOLCHAIN_PREFIX ?=
@@ -125,7 +125,11 @@ desktop-test: $(ISO)
 	python3 scripts/desktop-test.py $(ISO)
 
 .PHONY: test
-test: test-host test-host-sanitized smoke desktop-test panic-test timer-test
+test: test-host test-host-sanitized smoke desktop-test cpu-test panic-test timer-test
+
+.PHONY: cpu-test
+cpu-test: $(ISO)
+	python3 scripts/cpu-test.py $(ISO)
 
 .PHONY: panic-test
 panic-test: $(ISO)

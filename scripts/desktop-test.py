@@ -74,7 +74,15 @@ def main():
     parser.add_argument("--output-dir", default="build/desktop-test")
     parser.add_argument("--expect-size", default="1024x768")
     parser.add_argument("--memory", default="256M")
+    parser.add_argument("--cpu", help="QEMU CPU model and properties for reporting tests")
+    parser.add_argument("--expect-cpu-base", "--expect-cpu-speed", dest="expect_cpu_speed",
+                        help="Expected formatted CPU speed, or Unavailable")
+    parser.add_argument("--expect-cpu-label", choices=["CPU base speed", "CPU boot speed"])
+    parser.add_argument("--firmware-cpu-mhz", type=int, help="Synthetic SMBIOS startup speed, 0 means unknown")
+    parser.add_argument("--smbios-entry-point", choices=["32", "64"], default="64")
     args = parser.parse_args()
+    if args.firmware_cpu_mhz is not None and not 0 <= args.firmware_cpu_mhz <= 65535:
+        parser.error("--firmware-cpu-mhz must be between 0 and 65535")
     total_timeout = int(os.environ.get("MYOS_DESKTOP_TIMEOUT", "180"))
     if total_timeout <= 0:
         parser.error("MYOS_DESKTOP_TIMEOUT must be a positive number of seconds")
@@ -93,7 +101,11 @@ def main():
     import tempfile
     with tempfile.TemporaryDirectory(prefix="myos-qmp-") as temp, (output / "qemu.log").open("w") as error_log:
         process = subprocess.Popen([
-            "qemu-system-x86_64", "-M", "q35", "-m", args.memory, "-cdrom", str(iso),
+            "qemu-system-x86_64", "-M", "q35", "-m", args.memory,
+            *(["-cpu", args.cpu] if args.cpu else []), "-cdrom", str(iso),
+            "-machine", f"smbios-entry-point-type={args.smbios_entry_point}",
+            *(["-smbios", f"type=4,current-speed={args.firmware_cpu_mhz},max-speed=5000"]
+              if args.firmware_cpu_mhz is not None else []),
             "-boot", "d", "-display", "none", "-serial", f"file:{serial}",
             "-qmp", f"unix:{temp}/qmp,server=on,wait=off", "-no-reboot", "-no-shutdown",
         ], stdout=subprocess.DEVNULL, stderr=error_log)
@@ -204,6 +216,15 @@ def main():
             assert screenshot("terminal")[2] != before_echo, "Terminal output did not render"
             type_text("cpu\n")
             wait_marker("MYOS: command cpu")
+            cpu_reports = re.findall(r"^MYOS: (CPU (?:base|boot) speed): ([^\r\n]+)", log(), re.MULTILINE)
+            assert len(cpu_reports) == 1, f"Missing or ambiguous CPU report: {log()}"
+            cpu_label, cpu_speed = cpu_reports[0]
+            assert re.fullmatch(r"Unavailable|[1-9]\d{0,2} MHz|[1-9]\d*\.\d{2} GHz", cpu_speed), cpu_speed
+            if args.expect_cpu_speed is not None:
+                assert cpu_speed == args.expect_cpu_speed, (cpu_speed, args.expect_cpu_speed)
+            if args.expect_cpu_label is not None:
+                assert cpu_label == args.expect_cpu_label, (cpu_label, args.expect_cpu_label)
+            screenshot("cpu")
             type_text("mem\n")
             wait_marker("MYOS: command mem")
             type_text("uptime\n")
@@ -274,6 +295,8 @@ def main():
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
                                  "frame allocator boot self-test", "live uptime", "memory command", "timer and HLT wake progress"],
+                      "cpu_model": args.cpu, "cpu_speed": cpu_speed, "cpu_speed_label": cpu_label,
+                      "firmware_cpu_mhz": args.firmware_cpu_mhz, "smbios_entry_point": args.smbios_entry_point,
                       "iso_sha256": hashlib.sha256(iso.read_bytes()).hexdigest()}
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print(json.dumps(result, indent=2))

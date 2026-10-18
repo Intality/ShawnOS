@@ -6,6 +6,7 @@
 #include <myos/serial.hpp>
 #include <myos/memory.hpp>
 #include <myos/runtime.hpp>
+#include <myos/smbios.hpp>
 
 extern "C" void myos_halt_forever();
 
@@ -38,6 +39,11 @@ volatile limine_hhdm_request hhdm_request = {
 __attribute__((used, section(".limine_requests")))
 volatile limine_executable_cmdline_request cmdline_request = {
     .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID, .revision = 0, .response = nullptr,
+};
+
+__attribute__((used, section(".limine_requests")))
+volatile limine_smbios_request smbios_request = {
+    .id = LIMINE_SMBIOS_REQUEST_ID, .revision = 0, .response = nullptr,
 };
 
 __attribute__((used, section(".limine_requests_end")))
@@ -98,7 +104,8 @@ extern "C" void kmain() {
         limine_framebuffer *framebuffer = framebuffer_request.response->framebuffers[i];
         if (myos::desktop_init(framebuffer)) {
             myos::timer_start(hhdm_request.response->offset);
-            myos::clock_init();
+            myos::clock_init(myos::smbios_firmware_mhz(smbios_request.response,
+                memmap_request.response, hhdm_request.response->offset));
             myos::exception_selftest(cmdline_request.response ? cmdline_request.response->cmdline : nullptr);
             myos::serial_write_line("MYOS: boot ok v0.3.1");
             myos::desktop_run();

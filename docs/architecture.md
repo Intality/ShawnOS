@@ -127,7 +127,19 @@ counting overlaps. Reserved/MMIO, framebuffer, and bad-memory regions are exclud
 It describes identified RAM, not an installed-DIMM capacity measurement. The count
 includes RAM above 4 GiB even though allocation remains limited below that address.
 
-After enabling the PIT, boot queries CPUID leaf 0x16 for reported CPU base MHz.
+At boot, CPU identity and the maximum basic CPUID leaf are checked before reading
+Intel leaf 0x16's reported CPU base MHz. Only the defined low 16 bits of EAX are
+used. When that value is absent or zero, Intel's extended CPUID brand leaves
+0x80000002-0x80000004 are read only after checking the maximum extended leaf.
+A bounded parser accepts an explicit `@ numberGHz` or `@ numberMHz` suffix as a
+nominal base specification. The 48-byte input is bounded even without a NUL;
+ambiguous, malformed, overflowing, and fractional-MHz values are rejected.
+There are no CPU model matches or model-to-frequency tables. A vendor-independent
+SMBIOS Type 4 startup-speed fallback handles other vendors or missing base reports.
+Both SMBIOS entry formats are requested through Limine; entry checksums, bounded
+structure parsing, and reserved-mapped physical-range checks protect all reads.
+The fallback is labelled CPU boot speed, never CPU base speed. Missing, malformed,
+or conflicting firmware reports remain unavailable without stopping boot.
 Serialized RDTSC samples across PIT channel 2's 65535-count one-shot interval
 (about 55 ms) estimate TSC MHz independently of timer interrupt delivery. The
 speaker and IRQ0 delivery are disabled during the measurement; the prior PIC
@@ -136,8 +148,19 @@ Polling has a finite iteration cap and computation between port reads. A
 stuck channel 2 produces a panic. Sustained IRQ0 delivery is verified by the
 automated desktop and repeated-boot tests, after entering the real idle loop.
 The kernel does not yet have an independent runtime interrupt watchdog; loss
-of IRQ0 delivery can still stall an idle CPU. This boot estimate is labeled TSC clock and
-never presented as live core frequency. About selects reported CPU base MHz when
-available and otherwise displays the approximate counter rate. `cpu` shows both.
+of IRQ0 delivery can still stall an idle CPU. This boot estimate is labeled TSC
+clock in the diagnostic `cpu` command and is never used as CPU base speed.
+
+About and `cpu` share a bounded integer-only formatter for CPU speed. Values
+below 1,000 MHz use MHz; values at or above that threshold use GHz rounded to two
+decimal places. Unavailable base frequency displays `Unavailable`, with no TSC
+fallback. Base and boot sources remain distinct; neither is a measurement of
+current turbo speed or overclocking. The CPUID guards and formatter boundaries
+and brand parsing are covered by the normal and sanitizer-enabled host tests,
+including different reported frequencies, unsupported vendors, truncation,
+embedded NULs, and integer-overflow boundaries.
+
+See [CPU compatibility](cpu-support.md) for the firmware parser's limits and the
+cross-vendor QEMU boot matrix. Vendor-ID simulations do not certify real chips.
 
 About refreshes only its uptime band while unobscured, so periodic updates do not monopolize the input loop in software virtualization. Bringing it to the front redraws current readings.

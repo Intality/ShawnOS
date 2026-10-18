@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <myos/memory.hpp>
 #include <myos/runtime.hpp>
+#include <myos/cpu.hpp>
 #include <myos/serial.hpp>
 
 extern "C" void myos_outb(uint16_t, uint8_t);
@@ -30,7 +31,8 @@ Tss tss = {};
 alignas(16) uint8_t emergency_stacks[3][16384];
 alignas(8) volatile uint64_t ticks = 0;
 uint64_t wakes = 0;
-uint64_t base_mhz = 0, counter_mhz = 0;
+myos::CpuFrequency frequency;
+uint64_t counter_mhz = 0;
 
 uint64_t read_msr(uint32_t reg) {
     uint32_t low, high;
@@ -250,16 +252,39 @@ void timer_start(uint64_t direct_map_offset) {
     serial_write_line("MYOS: PIT ready 100 Hz");
     asm volatile("sti" ::: "memory");
 }
-uint64_t cpu_base_mhz() { return base_mhz; }
+CpuFrequency cpu_frequency() { return frequency; }
 uint64_t tsc_mhz() { return counter_mhz; }
-void clock_init() {
+void clock_init(uint64_t firmware_mhz) {
     uint32_t a, b, c, d;
     asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
-    const uint32_t maximum = a;
-    if (maximum >= 0x16) {
+    const CpuIdRegisters identity{a, b, c, d};
+    uint64_t base_mhz = 0, brand_mhz = 0;
+    if (has_cpu_base_frequency(identity)) {
         asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x16), "c"(0));
-        base_mhz = a & 0xffff;
+        base_mhz = reported_cpu_base_mhz(identity, a);
     }
+    if (!base_mhz && is_intel_cpu(identity)) {
+        asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x80000000u), "c"(0));
+        if (a >= 0x80000004u) {
+            char brand[CPU_BRAND_BYTES + 1]{};
+            for (uint32_t index = 0; index < 3; ++index) {
+                asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                             : "a"(0x80000002u + index), "c"(0));
+                const uint32_t words[] = {a, b, c, d};
+                for (unsigned word = 0; word < 4; ++word) {
+                    for (unsigned byte = 0; byte < 4; ++byte) {
+                        brand[index * 16 + word * 4 + byte] =
+                            static_cast<char>(words[word] >> (byte * 8));
+                    }
+                }
+            }
+            brand_mhz = cpu_brand_base_mhz(identity, brand, CPU_BRAND_BYTES);
+            if (brand_mhz) serial_write_line("MYOS: CPU base source: Intel brand string");
+        }
+    }
+    frequency = select_cpu_frequency(base_mhz, brand_mhz, firmware_mhz);
+    if (frequency.source == CpuFrequencySource::FirmwareBoot)
+        serial_write_line("MYOS: CPU speed source: SMBIOS startup report");
     asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
     const bool has_tsc = (d & (1u << 4)) != 0;
     uint64_t first, last;
@@ -267,7 +292,7 @@ void clock_init() {
     if (has_tsc && last > first && last - first <= UINT64_MAX / 1193182) {
         counter_mhz = (last - first) * 1193182 / (65535ull * 1000000);
     }
-    serial_write_line(base_mhz ? "MYOS: CPU base frequency reported" : "MYOS: CPU base frequency unavailable");
+    serial_write_line(frequency.mhz ? "MYOS: CPU frequency reported" : "MYOS: CPU frequency unavailable");
     serial_write_line(counter_mhz ? "MYOS: clock counter calibrated" : "MYOS: clock counter unavailable");
 }
 uint64_t timer_ticks() { return ticks; }

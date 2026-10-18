@@ -245,9 +245,34 @@ so it can be slightly below configured or installed capacity. `mem` reports exac
 whole-KiB detected, usable, managed, and free counts, including detected RAM above
 the allocator's 4 GiB ceiling.
 
-`cpu` reports the CPU's base frequency when CPUID leaf 0x16 provides it. This is
-not a live turbo frequency. The TSC clock is measured against a PIT channel 2 interval at boot
-and shown with `~`; About uses it only when CPU base frequency is unavailable.
-Virtual machines may hide CPU frequency or virtualize their timestamp counter.
-The TSC reading is a clock-counter rate, not CPU execution speed or host speed.
+About and `cpu` label the hardware-reported frequency as **CPU base speed**.
+Intel CPUs that expose CPUID leaf 0x16 provide this value in MHz. If it is missing
+or zero, an explicit Intel brand-string suffix such as `@ 2.40GHz` or `@ 800MHz`
+can supply the nominal base specification. The brand is queried from the running
+CPU, not a model-name lookup table or a fixed build-time value. Unsupported
+vendors and brands without a valid suffix use a vendor-independent SMBIOS
+startup-speed fallback, labelled **CPU boot speed** rather than base speed.
+Missing or invalid firmware data still reports **Unavailable** without preventing boot.
+Values below 1,000 MHz are displayed in MHz; higher values use GHz, rounded to two decimal
+places. Missing, zero, or unsupported frequency data is shown as **Unavailable**.
+This is a static base specification, not live turbo or overclocked speed, and a
+virtual machine may not expose it. About never substitutes a timer-counter rate.
+
+Intel describes the brand-string frequency as the manufacturing-time base
+specification in its [frequency display advisory](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/processor-frequency-display-mismatch-windows-advisory.pdf).
+This fallback does not measure current execution speed or a configured cTDP point.
+
+The `cpu` command retains a separate TSC clock diagnostic, measured against a PIT
+channel 2 interval at boot and shown with `~`. The TSC reading is a clock-counter
+rate, not CPU execution speed or host speed.
 The separately labeled PIT / 100 Hz reading is the system timer frequency.
+
+The [VirtualBox CPU reporting lab](docs/virtualbox-cpu-tests.md) runs the same ISO
+against different simulated CPU frequency reports, including the MHz/GHz boundary
+and missing-data cases, without changing existing VMs or the physical CPU clock.
+
+`make cpu-test` boots the same ISO with AMD, Intel, and other vendor-ID simulations
+using both SMBIOS entry formats. See [CPU compatibility](docs/cpu-support.md) for
+source labels, coverage, platform requirements, and remaining limits. A missing
+speed reading is not an unsupported-CPU boot error; universal hardware compatibility
+has not been established.

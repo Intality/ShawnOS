@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-and-smoke-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,6 +38,9 @@ jobs:
       - name: Desktop interaction tests
         run: make desktop-test TOOLCHAIN=llvm
 
+      - name: Cross-vendor CPU and firmware reporting matrix
+        run: make cpu-test TOOLCHAIN=llvm
+
       - name: Desktop at 640x480
         run: |
           make iso TOOLCHAIN=llvm ISO=build/myos-640.iso LIMINE_CONFIG=tests/limine-640.conf
@@ -63,6 +66,7 @@ jobs:
           path: |
             build/desktop-test/
             build/desktop-test-640/
+            build/cpu-tests/
             build/smoke-serial.log
             build/panic-tests/**/panic.ppm
             build/panic-tests/**/serial.log
@@ -75,4 +79,15 @@ jobs:
             build/timer-tests/**/failure-*.txt
             build/timer-tests/**/screen.ppm
             build/timer-tests/result.json
+
+  virtualbox-profile-self-tests:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate VirtualBox CPU profiles without starting VMs
+        shell: pwsh
+        run: ./scripts/virtualbox-cpu-test.ps1 -Mode SelfTest
 
