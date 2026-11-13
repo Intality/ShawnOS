@@ -179,16 +179,6 @@ void terminal_memory(const char *label, uint64_t bytes) {
     serial_write(" bytes="); serial_write(digits);
     serial_write(" value="); serial_write_line(size.data);
 }
-void terminal_stat(const char *label, uint64_t value, const char *unit) {
-    TextBuffer<80> line;
-    char digits[21];
-    number(value, digits);
-    const char *parts[] = {label, digits, unit};
-    for (const char *part : parts) {
-        while (*part) { line.append(*part++); }
-    }
-    terminal_line(line.data);
-}
 void execute_command() {
     terminal_line(command_line.data);
     const char *command = command_line.data;
@@ -222,9 +212,14 @@ void execute_command() {
         for (const char *c = speed.data; *c; ++c) info.append(*c);
         terminal_line(info.data);
         serial_write("MYOS: "); serial_write_line(info.data);
-        if (tsc_mhz()) { terminal_stat("TSC clock: ~", tsc_mhz(), " MHz"); }
-        else { terminal_line("TSC clock: unavailable"); }
-        terminal_line("TSC is a clock counter, not live CPU speed.");
+        const uint64_t counter_mhz = tsc_mhz();
+        if (counter_mhz) {
+            char digits[21];
+            number(counter_mhz, digits);
+            serial_write("MYOS: TSC clock: ~"); serial_write(digits); serial_write_line(" MHz");
+        } else {
+            serial_write_line("MYOS: TSC clock: unavailable");
+        }
         serial_write_line("MYOS: command cpu");
     } else if (equal(command, "uptime")) {
         const uint64_t ticks = timer_ticks();
@@ -236,8 +231,6 @@ void execute_command() {
             while (*part) { line.append(*part++); }
         }
         terminal_line(line.data);
-        terminal_stat("Timer ticks: ", ticks, "");
-        terminal_stat("Idle wakes: ", idle_wakes(), "");
         char digits[21];
         serial_write("MYOS: uptime seconds="); number(seconds, digits); serial_write(digits);
         serial_write(" ticks="); number(ticks, digits); serial_write(digits);
@@ -304,8 +297,10 @@ void paint_note(Rect r) {
     canvas.text(count, r.x + 16, r.y + r.h - 16, MUTED, 1);
     canvas.text(note.size == 2047 ? "Full" : "characters", r.x + 54, r.y + r.h - 16, MUTED, 1);
 }
-void paint_about_uptime(Rect r) {
-    const Rect band = {r.x + 136, r.y + 270, r.w - 160, 20};
+Rect about_uptime_band(Rect r) {
+    return {r.x + 136, r.y + 246, r.w - 160, 20};
+}
+void paint_about_uptime(Rect band) {
     canvas.rect(band, PAPER);
     const auto text = uptime_text(timer_ticks() / TIMER_HZ);
     const int scale = text_width(text.data) > band.w ? 1 : 2;
@@ -320,17 +315,18 @@ void paint_about(Rect r) {
     const auto free_ram = memory_size_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE);
     const auto frequency = cpu_frequency();
     const auto speed = cpu_frequency_text(frequency.mhz);
-    const char *keys[] = {"Kernel", frequency.label(), "Detected RAM", "Free RAM", "Timer"};
-    const char *values[] = {"C++ / x86-64", speed.data, detected_ram.data, free_ram.data, "PIT / 100 Hz"};
-    for (int i = 0; i < 5; ++i) {
+    const char *keys[] = {"Kernel", frequency.label(), "Detected RAM", "Free RAM"};
+    const char *values[] = {"C++ / x86-64", speed.data, detected_ram.data, free_ram.data};
+    for (int i = 0; i < 4; ++i) {
         const int y = r.y + 150 + i * 24;
         const int scale = text_width(values[i]) > r.w - 160 ? 1 : 2;
         canvas.text(keys[i], r.x + 24, y, MUTED, 1);
         canvas.text(values[i], r.x + 136, y, INK, scale, r.w - 160);
 
     }
-    canvas.text("Uptime", r.x + 24, r.y + 270, MUTED, 1);
-    paint_about_uptime(r);
+    const Rect band = about_uptime_band(r);
+    canvas.text("Uptime", r.x + 24, band.y, MUTED, 1);
+    paint_about_uptime(band);
 }
 Rect swatch(Rect r, int style) {
     const int width = (r.w - 64) / 2;
@@ -661,9 +657,9 @@ bool desktop_init(limine_framebuffer *framebuffer) {
                 if (visible(order[i])) { top = order[i]; break; }
             }
             if (!dirty && top == About) {
-                const Rect r = windows[About].bounds;
-                paint_about_uptime(r);
-                canvas.present({r.x + 136, r.y + 270, r.w - 160, 20});
+                const Rect band = about_uptime_band(windows[About].bounds);
+                paint_about_uptime(band);
+                canvas.present(band);
                 draw_cursor();
             }
             if (!timer_proven) { timer_proven = true; serial_write_line("MYOS: timer ticked"); }
