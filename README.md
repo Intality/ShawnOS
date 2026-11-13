@@ -212,9 +212,11 @@ the normal ISO requests 1024x768.
 Input still uses bounded PS/2 polling; only the timer IRQ is enabled. The CPU
 sleeps with `hlt` when input is exhausted and wakes approximately every 10 ms.
 The timer is not a wall clock and does not schedule processes. The frame
-allocator manages usable RAM below 4 GiB, never bootloader, kernel, ACPI, or
-framebuffer reservations; `mem` distinguishes reported usable RAM from managed
-RAM. Physical frame allocation is not a C++ heap or a user-process memory system.
+allocator manages all fully covered usable RAM pages in the firmware map,
+including RAM above 4 GB. Bootloader, kernel, ACPI, framebuffer, and device
+reservations are not available for allocation. Its own tracking storage is
+reserved too. `mem` distinguishes detected, usable, managed, and free RAM.
+Physical frame allocation is not a C++ heap or a user-process memory system.
 Exceptions stop the session, so unsaved Notes text is lost on restart. Very early
 boot failures before framebuffer setup report only to serial. See
 `docs/architecture.md` for initialization order and the remaining constraints.
@@ -238,12 +240,50 @@ Follow `docs/release.md` to publish a versioned release after CI passes.
 
 ## Hardware Readings
 
-About shows detected and free RAM in MiB with two decimal places. Detected RAM
+About and `mem` use the familiar 1024-based RAM display, with MB/GB labels and
+two decimal places rounded half up. In this display convention, MB represents
+1,048,576 bytes and GB represents 1,073,741,824 bytes: a 4096 RAM setting in
+VirtualBox corresponds to 4.00 GB, not 4.29 GB. These are deliberately not decimal
+SI conversions. Values below 1,073,741,824 bytes use MB; values at or above it
+use GB. A value just below the boundary can round to 1024.00 MB. This only
+changes presentation. Detected RAM
 is the union of RAM regions identified in Limine's map: usable RAM, kernel/modules,
 bootloader memory, and ACPI memory. Ambiguous reserved ranges and MMIO are excluded,
-so it can be slightly below configured or installed capacity. `mem` reports exact
-whole-KiB detected, usable, managed, and free counts, including detected RAM above
-the allocator's 4 GiB ceiling.
+so it can be slightly below configured or installed capacity. `mem` keeps detected,
+usable, managed, and free RAM distinct. The allocator no longer has a 4 GB
+address ceiling: it tracks usable regions above device-address gaps as well as
+low RAM. Free RAM excludes allocator bookkeeping and outstanding allocations.
+Raw byte counts remain in serial test diagnostics.
+
+Desktop tests check the 1024-based conversion and the exact memory text drawn in About.
+The low-memory check uses one CPU and QEMU's `--memory 64M` setting (67,108,864
+assigned bytes; detected/free RAM is lower). Larger checks use `1536M` and `4096M`:
+
+```sh
+python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --memory 64M --output-dir build/memory-test-64
+python3 scripts/desktop-test.py build/myos-x86_64.iso --memory 1536M --output-dir build/memory-test-gb
+python3 scripts/desktop-test.py build/myos-x86_64.iso --memory 4096M --output-dir build/memory-test-4096
+```
+
+Run the physical-memory capacity matrix in Ubuntu:
+
+```sh
+make memory-test TOOLCHAIN=llvm
+python3 scripts/memory-test.py --memory 64 1024 4096 8192 16384
+python3 scripts/memory-test.py --memory 64 1023 1024 1025 16384 --resolution 640x480 --output-dir build/memory-tests-640
+```
+
+Each run builds a separate test-only ISO with `selftest=memory`. It allocates
+every available frame until exhaustion, then checks that every non-metadata
+usable page can be released and that the original free count is restored.
+Normal boots also write/read physical pages above 4 GB and at the top of usable
+RAM when high memory exists. The matrix then checks desktop input and visible
+memory readings. It uses QEMU's on-demand host memory backing and a 1.5 GB
+resident-memory safety limit, so testing a 16 GB guest does not require filling
+16 GB of host RAM. This is not an exhaustive read/write test of every RAM byte.
+Native tests also exhaust simulated 32 GB RAM and exercise sparse high addresses;
+those do not certify a 32 GB VM or physical hardware. Results and failures are
+saved in fresh folders under `build/memory-tests/`.
 
 About and `cpu` label the hardware-reported frequency as **CPU base speed**.
 Intel CPUs that expose CPUID leaf 0x16 provide this value in MHz. If it is missing

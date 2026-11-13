@@ -5,6 +5,7 @@
 #include <myos/input.hpp>
 #include <myos/text_buffer.hpp>
 #include <myos/memory.hpp>
+#include <myos/memory_format.hpp>
 #include <myos/cpu.hpp>
 #include <myos/smbios.hpp>
 #include <cstring>
@@ -110,54 +111,165 @@ void graphics_tests(int width, int height) {
 }
 void memory_tests() {
     FrameAllocator frames;
+    FrameStorage storage;
+    std::vector<uint8_t> backing;
+    const auto init = [&](limine_memmap_entry *const *entries, size_t count) {
+        if (!FrameAllocator::storage_plan(entries, count, storage)) {
+            assert(storage.address == 0 && storage.bytes == 0);
+            return frames.init(entries, count, storage, nullptr);
+        }
+        backing.assign(storage.bytes + 2, 0xa5);
+        const bool ok = frames.init(entries, count, storage, backing.data() + 1);
+        assert(backing.front() == 0xa5 && backing.back() == 0xa5);
+        return ok;
+    };
     limine_memmap_entry low = {0, 0x3000, LIMINE_MEMMAP_USABLE};
     limine_memmap_entry reserved = {0x3000, 0x1000, LIMINE_MEMMAP_EXECUTABLE_AND_MODULES};
     limine_memmap_entry usable = {0x4001, 0x3fff, LIMINE_MEMMAP_USABLE};
-    limine_memmap_entry high = {FrameAllocator::LIMIT, 0x2000, LIMINE_MEMMAP_USABLE};
+    constexpr uint64_t four_gb = 1ull << 32;
+    limine_memmap_entry high = {four_gb, 0x2000, LIMINE_MEMMAP_USABLE};
     limine_memmap_entry *map[] = {&low, &reserved, &usable, &high};
-    assert(frames.init(map, 4));
+    assert(init(map, 4));
     assert(frames.usable_bytes() == 0x3000 + 0x3fff + 0x2000);
     assert(frames.detected_bytes() == 0x3000 + 0x1000 + 0x3fff + 0x2000);
-    assert(frames.managed_frames() == 5 && frames.free_frames() == 5);
+    assert(frames.managed_frames() == 7 && frames.free_frames() == 6);
+    assert(storage.address == 4096 && storage.bytes == 4096);
+    assert(!frames.release(storage.address));
+    assert(frames.allocate(four_gb + 1) == four_gb + 4096);
+    assert(!frames.allocate(four_gb + 1) && frames.free_frames() == 5);
+    assert(frames.release(four_gb + 4096));
     std::vector<uint64_t> allocated;
     while (uint64_t address = frames.allocate()) {
-        assert(address % 4096 == 0 && address < FrameAllocator::LIMIT);
+        assert(address % 4096 == 0 && address < four_gb + 8192);
+        assert(address != storage.address);
         assert(address != 0x3000 && address != 0x4000);
         for (uint64_t previous : allocated) { assert(previous != address); }
         allocated.push_back(address);
     }
-    assert(allocated.size() == 5 && !frames.allocate() && frames.free_frames() == 0);
+    assert(allocated.size() == 6 && !frames.allocate() && frames.free_frames() == 0);
     assert(!frames.release(0) && !frames.release(0x3000) && !frames.release(0x4000));
-    assert(!frames.release(allocated[0] + 1) && !frames.release(FrameAllocator::LIMIT));
+    assert(!frames.release(allocated[0] + 1) && !frames.release(four_gb + 8192));
     assert(frames.release(allocated[0]) && !frames.release(allocated[0]));
     assert(frames.allocate() == allocated[0] && frames.free_frames() == 0);
     for (uint64_t address : allocated) { assert(frames.release(address)); }
-    assert(frames.free_frames() == frames.managed_frames());
+    assert(frames.free_frames() == frames.managed_frames() - 1);
+    assert(backing.front() == 0xa5 && backing.back() == 0xa5);
     limine_memmap_entry overlap = {0x2000, 0x2000, LIMINE_MEMMAP_RESERVED};
     limine_memmap_entry *bad[] = {&low, &overlap};
-    assert(!frames.init(bad, 2) && !frames.allocate());
+    assert(!init(bad, 2) && !frames.allocate());
     overlap = {UINT64_MAX - 2, 4, LIMINE_MEMMAP_USABLE};
-    assert(!frames.init(bad, 2) && !frames.allocate());
+    assert(!init(bad, 2) && !frames.allocate());
     limine_memmap_entry *null_map[] = {nullptr};
-    assert(!frames.init(nullptr, 1) && !frames.init(null_map, 1) && !frames.init(map, 0));
-    assert(!frames.init(map, 4097));
+    assert(!init(nullptr, 1) && !init(null_map, 1) && !init(map, 0));
+    assert(!init(map, 4097));
     limine_memmap_entry *unsorted[] = {&usable, &low};
-    assert(!frames.init(unsorted, 2));
+    assert(!init(unsorted, 2));
     limine_memmap_entry r1 = {0x1000, 0x1000, LIMINE_MEMMAP_RESERVED};
     limine_memmap_entry r2 = {0x1800, 0x1000, LIMINE_MEMMAP_RESERVED_MAPPED};
     limine_memmap_entry *reserved_overlap[] = {&r1, &r2, &usable};
-    assert(frames.init(reserved_overlap, 3) && frames.managed_frames() == 3);
+    assert(init(reserved_overlap, 3) && frames.managed_frames() == 3 && frames.free_frames() == 2);
     limine_memmap_entry reclaimable = {0x1000, 0x1000, LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE};
     limine_memmap_entry *boot_memory[] = {&reclaimable};
-    assert(!frames.init(boot_memory, 1) && !frames.allocate());
-    limine_memmap_entry boundary = {FrameAllocator::LIMIT - 4096, 8192, LIMINE_MEMMAP_USABLE};
+    assert(!init(boot_memory, 1) && !frames.allocate());
+    limine_memmap_entry boundary = {four_gb - 4096, 12288, LIMINE_MEMMAP_USABLE};
     limine_memmap_entry *edge[] = {&boundary};
-    assert(frames.init(edge, 1) && frames.managed_frames() == 1);
-    assert(frames.allocate() == FrameAllocator::LIMIT - 4096 && !frames.allocate());
-    assert(frames.release(FrameAllocator::LIMIT - 4096));
+    assert(init(edge, 1) && frames.managed_frames() == 3);
+    assert(frames.allocate() == four_gb && frames.allocate() == four_gb + 4096 && !frames.allocate());
+    assert(frames.release(four_gb) && !frames.release(four_gb - 4096));
+    boundary = {UINT64_MAX - 16383, 16383, LIMINE_MEMMAP_USABLE};
+    assert(init(edge, 1) && frames.managed_frames() == 3);
+    assert(frames.highest_address() == UINT64_MAX - 4095);
+    assert(frames.allocate(UINT64_MAX - 8191) == UINT64_MAX - 8191);
+    assert(!frames.allocate(UINT64_MAX));
+    assert(frames.release(UINT64_MAX - 8191));
+    high = {1ull << 48, 8192, LIMINE_MEMMAP_USABLE};
+    assert(init(map, 4) && storage.bytes == 4096);
+    assert(frames.allocate(1ull << 48) == (1ull << 48));
+    assert(frames.release(1ull << 48));
+    assert(!frames.release((1ull << 48) - 4096));
+    FrameStorage wrong = storage;
+    ++wrong.bytes;
+    assert(!frames.init(map, 4, wrong, backing.data() + 1) && !frames.allocate());
+    wrong = storage; ++wrong.address;
+    assert(!frames.init(map, 4, wrong, backing.data() + 1) && !frames.allocate());
     low = {0, 4096, LIMINE_MEMMAP_USABLE};
-    assert(!frames.init(map, 1) && !frames.allocate());
+    assert(!init(map, 1) && !frames.allocate());
+
+    uint32_t random = 0x51a7c0de;
+    for (unsigned trial = 0; trial < 32; ++trial) {
+        std::vector<limine_memmap_entry> entries;
+        uint64_t base = 4096;
+        for (unsigned n = 0; n < 40; ++n) {
+            random = random * 1664525u + 1013904223u;
+            const uint64_t length = (1 + random % 17) * 4096;
+            entries.push_back({base, length, static_cast<uint64_t>(n % 3 == 1 ? LIMINE_MEMMAP_RESERVED : LIMINE_MEMMAP_USABLE)});
+            base += length + (1ull << 30);
+        }
+        std::vector<limine_memmap_entry *> pointers;
+        for (auto &entry : entries) { pointers.push_back(&entry); }
+        assert(init(pointers.data(), pointers.size()));
+        std::vector<uint64_t> expected;
+        for (const auto &entry : entries) {
+            if (entry.type != LIMINE_MEMMAP_USABLE) { continue; }
+            for (uint64_t address = entry.base; address < entry.base + entry.length; address += 4096) {
+                if (address < storage.address || address - storage.address >= storage.bytes) { expected.push_back(address); }
+            }
+        }
+        assert(frames.free_frames() == expected.size());
+        for (uint64_t address : expected) { assert(frames.allocate() == address); }
+        assert(!frames.allocate());
+        for (auto it = expected.rbegin(); it != expected.rend(); ++it) { assert(frames.release(*it)); }
+        const size_t middle = expected.size() / 2;
+        assert(frames.allocate(expected[middle] + 1) == expected[middle + 1]);
+        assert(frames.release(expected[middle + 1]));
+        assert(frames.free_frames() == expected.size());
+        const uint64_t before = frames.free_frames();
+        for (const auto &entry : entries) { assert(!frames.release(entry.base + entry.length)); }
+        assert(frames.free_frames() == before);
+        assert(backing.front() == 0xa5 && backing.back() == 0xa5);
+    }
+
+    // Exhaust every page without allocating the represented RAM on the host.
+    for (uint64_t mb : {64, 4096, 16384, 32768}) {
+        low = {0, mb * 1024 * 1024, LIMINE_MEMMAP_USABLE};
+        assert(init(map, 1));
+        const uint64_t total = low.length / 4096;
+        assert(frames.managed_frames() == total - 1);
+        const uint64_t first = 1 + storage.bytes / 4096;
+        assert(frames.free_frames() == total - first);
+        assert(!frames.allocate(low.length));
+        for (uint64_t n = first; n < total; ++n) { assert(frames.allocate() == n * 4096); }
+        assert(!frames.free_frames() && !frames.allocate());
+        for (uint64_t n = total; n-- > first;) { assert(frames.release(n * 4096)); }
+        assert(frames.free_frames() == total - first);
+        for (uint64_t n = 1; n < first; ++n) { assert(!frames.release(n * 4096)); }
+        assert(frames.allocate() == first * 4096);
+        assert(backing.front() == 0xa5 && backing.back() == 0xa5);
+    }
 }
+void memory_format_tests() {
+    const struct { uint64_t bytes; const char *expected; } cases[] = {
+        {0, "0.00 MB"}, {1, "0.00 MB"}, {5242, "0.00 MB"}, {5243, "0.01 MB"},
+        {1000000, "0.95 MB"}, {1043333, "0.99 MB"}, {1043334, "1.00 MB"},
+        {1048576, "1.00 MB"}, {64000000, "61.04 MB"},
+        {64ull * 1024 * 1024, "64.00 MB"}, {1000000000, "953.67 MB"},
+        {1073736581, "1023.99 MB"}, {1073736582, "1024.00 MB"},
+        {(1ull << 30) - 1, "1024.00 MB"}, {1ull << 30, "1.00 GB"},
+        {1079110533, "1.00 GB"}, {1079110534, "1.01 GB"},
+        {1536ull * 1024 * 1024, "1.50 GB"},
+        {4096ull * 1024 * 1024, "4.00 GB"},
+        {8192ull * 1024 * 1024, "8.00 GB"},
+        {1000000000000ull, "931.32 GB"},
+        {UINT64_MAX, "17179869184.00 GB"},
+    };
+    for (const auto &test : cases) {
+        const auto text = memory_size_text(test.bytes);
+        assert(std::strcmp(text.data, test.expected) == 0);
+        assert(text.size == std::strlen(test.expected) && text.data[text.size] == 0);
+        assert(text_width(text.data) <= 260);
+    }
+}
+
 void cpu_tests() {
     using namespace myos;
     const CpuIdRegisters intel{0x16, 0x756e6547, 0x6c65746e, 0x49656e69};
@@ -366,10 +478,11 @@ void smbios_tests() {
 }
 
 int main() {
+    memory_format_tests();
     cpu_tests();
     smbios_tests();
     keyboard_tests(); mouse_tests(); text_tests();
     graphics_tests(640, 480); graphics_tests(1024, 768); graphics_tests(1920, 1200);
     memory_tests();
-    std::puts("Host tests passed: CPU reporting, input, text, graphics, and physical frame allocation.");
+    std::puts("Host tests passed: memory display, CPU reporting, input, text, graphics, and physical frame allocation.");
 }

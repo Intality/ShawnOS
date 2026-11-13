@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-and-smoke-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,6 +46,12 @@ jobs:
           make iso TOOLCHAIN=llvm ISO=build/myos-640.iso LIMINE_CONFIG=tests/limine-640.conf
           python3 scripts/desktop-test.py build/myos-640.iso --expect-size 640x480 --memory 128M --output-dir build/desktop-test-640
 
+      - name: Full usable-memory allocation and recovery
+        run: |
+          python3 tests/test_memory_cleanup.py
+          python3 scripts/memory-test.py --memory 64 1024 4096 8192 16384
+          python3 scripts/memory-test.py --memory 64 1025 16384 --resolution 640x480 --output-dir build/memory-tests-640
+
       - name: CPU exception and panic tests
         run: make panic-test TOOLCHAIN=llvm
 
@@ -66,6 +72,18 @@ jobs:
           path: |
             build/desktop-test/
             build/desktop-test-640/
+            build/memory-tests/**/result.json
+            build/memory-tests/**/serial.log
+            build/memory-tests/**/qemu.log
+            build/memory-tests/**/test-output.log
+            build/memory-tests/**/memory-about.ppm
+            build/memory-tests/**/failure*.ppm
+            build/memory-tests-640/**/result.json
+            build/memory-tests-640/**/serial.log
+            build/memory-tests-640/**/qemu.log
+            build/memory-tests-640/**/test-output.log
+            build/memory-tests-640/**/memory-about.ppm
+            build/memory-tests-640/**/failure*.ppm
             build/cpu-tests/
             build/smoke-serial.log
             build/panic-tests/**/panic.ppm
