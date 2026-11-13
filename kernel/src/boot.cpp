@@ -196,7 +196,7 @@ extern "C" void kmain() {
             myos::clock_init(myos::smbios_firmware_mhz(smbios_request.response,
                 memmap_request.response, hhdm_request.response->offset));
             myos::exception_selftest(cmdline_request.response ? cmdline_request.response->cmdline : nullptr);
-            myos::serial_write_line("MYOS: boot ok v0.3.1");
+            myos::serial_write_line("MYOS: boot ok v0.4.0");
             myos::desktop_run();
         }
     }

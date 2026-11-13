@@ -239,7 +239,7 @@ def main():
                     else:
                         key(punctuation.get(char, char))
 
-            wait_marker("MYOS: boot ok v0.3.1")
+            wait_marker("MYOS: boot ok v0.4.0")
             wait_marker("MYOS: GDT IDT TSS ready")
             wait_marker("MYOS: memory map ready")
             wait_marker("MYOS: frame allocator self-test passed")
@@ -355,7 +355,7 @@ def main():
             key("f3")
             about_memory = screenshot("memory-about")[2]
             muted = bytes.fromhex("61736d")
-            assert_text_pixels(about_memory, width, about_x + 92, about_y + 94, "Version 0.3.1 ", ink_color=muted)
+            assert_text_pixels(about_memory, width, about_x + 92, about_y + 94, "Version 0.4.0 ", ink_color=muted)
             for label, offset in [(cpu_label, 174), ("Uptime", 246)]:
                 assert_text_pixels(about_memory, width, about_x + 24, about_y + offset, label + " ",
                                    ink_color=muted, scale=1)
@@ -437,7 +437,7 @@ def main():
             assert pixel(sky_before, width - 4, 50) != pixel(sky_after, width - 4, 50), "Wallpaper did not change"
             qmp.execute("quit")
             process.wait(timeout=10)
-            result = {"version": "0.3.1", "resolution": args.expect_size, "memory": args.memory, "cpus": 1, "result": "passed",
+            result = {"version": "0.4.0", "resolution": args.expect_size, "memory": args.memory, "cpus": 1, "result": "passed",
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
                                  "frame allocator boot self-test", "live uptime", "formatted About and Terminal uptime",

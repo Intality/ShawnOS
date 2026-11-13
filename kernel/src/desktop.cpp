@@ -190,7 +190,7 @@ void execute_command() {
         terminal_count = 0;
         serial_write_line("MYOS: command clear");
     } else if (equal(command, "version")) {
-        terminal_line("ShawnOS 0.3.1 / x86-64 / C++");
+        terminal_line("ShawnOS 0.4.0 / x86-64 / C++");
         serial_write_line("MYOS: command version");
     } else if (equal(command, "about")) {
         open_app(About);
@@ -309,7 +309,7 @@ void paint_about_uptime(Rect band) {
 void paint_about(Rect r) {
     icon(About, r.x + 24, r.y + 62, 48);
     canvas.text("ShawnOS", r.x + 92, r.y + 64, INK, 3);
-    canvas.text("Version 0.3.1", r.x + 92, r.y + 94, MUTED);
+    canvas.text("Version 0.4.0", r.x + 92, r.y + 94, MUTED);
     canvas.rect({r.x + 24, r.y + 132, r.w - 48, 1}, EDGE);
     const auto detected_ram = memory_size_text(physical_frames().detected_bytes());
     const auto free_ram = memory_size_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE);
@@ -439,7 +439,7 @@ void render() {
     canvas.rect({0, 0, canvas.width(), 30}, INK);
     canvas.text("ShawnOS", 16, 8, PAPER);
     canvas.text("Desktop", 128, 8, 0xa9c9ba);
-    canvas.text("v0.3.1", canvas.width() - 92, 8, 0xa9c9ba);
+    canvas.text("v0.4.0", canvas.width() - 92, 8, 0xa9c9ba);
     for (int app = 0; app < APP_COUNT; ++app) {
         const Rect button = desktop_button(app);
         if (hover_target() == app) { outline(button, 0xcce6d6); }
@@ -633,7 +633,7 @@ bool desktop_init(limine_framebuffer *framebuffer) {
     serial_write_line(devices.keyboard ? "MYOS: keyboard ready" : "MYOS: keyboard unavailable");
     serial_write_line(devices.mouse ? "MYOS: mouse ready" : "MYOS: mouse unavailable");
     rebuild_background();
-    terminal_line("ShawnOS 0.3.1");
+    terminal_line("ShawnOS 0.4.0");
     open_app(About);
     render();
     serial_write_line("MYOS: desktop ready");

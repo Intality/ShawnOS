@@ -2,7 +2,7 @@
 .DELETE_ON_ERROR:
 
 PROJECT := MyOS
-VERSION := 0.3.1
+VERSION := 0.4.0
 ARCH := x86_64
 
 BUILD_DIR := build
