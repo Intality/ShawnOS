@@ -4,6 +4,7 @@
 #include <myos/serial.hpp>
 #include <myos/text_buffer.hpp>
 #include <myos/memory.hpp>
+#include <myos/memory_format.hpp>
 #include <myos/runtime.hpp>
 #include <myos/cpu.hpp>
 
@@ -163,15 +164,19 @@ void terminal_line(const char *text) {
         dest[col] = 0;
     } while (*text);
 }
-void ram_text(uint64_t bytes, char *out) {
+void terminal_memory(const char *label, uint64_t bytes) {
+    const auto size = memory_size_text(bytes);
+    TextBuffer<80> line;
+    const char *parts[] = {label, ": ", size.data};
+    for (const char *part : parts) {
+        while (*part) line.append(*part++);
+    }
+    terminal_line(line.data);
     char digits[21];
-    number(bytes / (1024 * 1024), digits);
-    int at = 0;
-    for (int i = 0; digits[i]; ++i) { out[at++] = digits[i]; }
-    const uint64_t fraction = bytes % (1024 * 1024) * 100 / (1024 * 1024);
-    out[at++] = '.'; out[at++] = '0' + fraction / 10; out[at++] = '0' + fraction % 10;
-    for (const char *unit = " MiB"; *unit; ++unit) { out[at++] = *unit; }
-    out[at] = 0;
+    number(bytes, digits);
+    serial_write("MYOS: memory "); serial_write(label);
+    serial_write(" bytes="); serial_write(digits);
+    serial_write(" value="); serial_write_line(size.data);
 }
 void terminal_stat(const char *label, uint64_t value, const char *unit) {
     TextBuffer<80> line;
@@ -202,10 +207,10 @@ void execute_command() {
         open_app(Notes);
     } else if (equal(command, "mem")) {
         const auto &frames = physical_frames();
-        terminal_stat("Detected RAM: ", frames.detected_bytes() / 1024, " KiB");
-        terminal_stat("Usable RAM: ", frames.usable_bytes() / 1024, " KiB");
-        terminal_stat("Managed RAM: ", frames.managed_frames() * 4, " KiB");
-        terminal_stat("Free RAM: ", frames.free_frames() * 4, " KiB");
+        terminal_memory("Detected RAM", frames.detected_bytes());
+        terminal_memory("Usable RAM", frames.usable_bytes());
+        terminal_memory("Managed RAM", frames.managed_frames() * FrameAllocator::PAGE_SIZE);
+        terminal_memory("Free RAM", frames.free_frames() * FrameAllocator::PAGE_SIZE);
         serial_write_line("MYOS: command mem");
     } else if (equal(command, "cpu")) {
         const auto frequency = cpu_frequency();
@@ -305,13 +310,12 @@ void paint_about(Rect r) {
     canvas.text("ShawnOS", r.x + 92, r.y + 64, INK, 3);
     canvas.text("Version 0.3.1", r.x + 92, r.y + 94, MUTED);
     canvas.rect({r.x + 24, r.y + 132, r.w - 48, 1}, EDGE);
-    char detected_ram[40], free_ram[40];
-    ram_text(physical_frames().detected_bytes(), detected_ram);
-    ram_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE, free_ram);
+    const auto detected_ram = memory_size_text(physical_frames().detected_bytes());
+    const auto free_ram = memory_size_text(physical_frames().free_frames() * FrameAllocator::PAGE_SIZE);
     const auto frequency = cpu_frequency();
     const auto speed = cpu_frequency_text(frequency.mhz);
     const char *keys[] = {"Kernel", frequency.label(), "Detected RAM", "Free RAM", "Timer"};
-    const char *values[] = {"C++ / x86-64", speed.data, detected_ram, free_ram, "PIT / 100 Hz"};
+    const char *values[] = {"C++ / x86-64", speed.data, detected_ram.data, free_ram.data, "PIT / 100 Hz"};
     for (int i = 0; i < 5; ++i) {
         const int y = r.y + 150 + i * 24;
         const int scale = text_width(values[i]) > r.w - 160 ? 1 : 2;

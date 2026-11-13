@@ -125,7 +125,11 @@ desktop-test: $(ISO)
 	python3 scripts/desktop-test.py $(ISO)
 
 .PHONY: test
-test: test-host test-host-sanitized smoke desktop-test cpu-test panic-test timer-test
+test: test-host test-host-sanitized smoke desktop-test memory-test cpu-test panic-test timer-test
+
+.PHONY: memory-test
+memory-test: $(ISO)
+	python3 scripts/memory-test.py
 
 .PHONY: cpu-test
 cpu-test: $(ISO)

@@ -2,28 +2,27 @@
 
 namespace {
 myos::FrameAllocator allocator;
+constexpr uint64_t page = myos::FrameAllocator::PAGE_SIZE;
+constexpr size_t max_entries = 4096;
 bool bit(const uint8_t *map, size_t index) { return (map[index / 8] & (1u << (index % 8))) != 0; }
 void set(uint8_t *map, size_t index, bool value) {
     const uint8_t mask = static_cast<uint8_t>(1u << (index % 8));
     if (value) { map[index / 8] |= mask; }
     else { map[index / 8] &= static_cast<uint8_t>(~mask); }
 }
+uint64_t first_frame(uint64_t address) {
+    const uint64_t first = address / page + (address % page != 0);
+    return first ? first : 1;
 }
-
-namespace myos {
-FrameAllocator &physical_frames() { return allocator; }
-bool FrameAllocator::init(limine_memmap_entry *const *entries, size_t count) {
-    detected_bytes_ = usable_bytes_ = managed_ = free_ = 0;
-    cursor_ = end_ = 1;
-    for (size_t i = 0; i < sizeof(eligible_); ++i) { eligible_[i] = allocated_[i] = 0; }
-    if (!entries || !count || count > 4096) { return false; }
+bool valid_map(limine_memmap_entry *const *entries, size_t count) {
+    if (!entries || !count || count > max_entries) { return false; }
     for (size_t i = 0; i < count; ++i) {
         const auto *e = entries[i];
         if (!e || e->length > UINT64_MAX - e->base || (i && e->base < entries[i - 1]->base)) {
             return false;
         }
     }
-    // Limine permits overlaps between reserved entries, but never with usable RAM.
+    // Reserved entries may overlap each other, but never eligible RAM.
     for (size_t i = 0; i < count; ++i) {
         const auto &e = *entries[i];
         if (e.type != LIMINE_MEMMAP_USABLE) { continue; }
@@ -34,19 +33,61 @@ bool FrameAllocator::init(limine_memmap_entry *const *entries, size_t count) {
             }
         }
     }
+    return true;
+}
+}
+
+namespace myos {
+FrameAllocator &physical_frames() { return allocator; }
+
+bool FrameAllocator::storage_plan(limine_memmap_entry *const *entries, size_t count, FrameStorage &storage) {
+    storage = {};
+    if (!valid_map(entries, count)) { return false; }
+    uint64_t frames = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const auto &e = *entries[i];
+        if (e.type != LIMINE_MEMMAP_USABLE) { continue; }
+        const uint64_t first = first_frame(e.base), stop = (e.base + e.length) / page;
+        if (stop > first) { frames += stop - first; }
+    }
+    const uint64_t bytes = (frames / 8 + (frames % 8 != 0) + page - 1) / page * page;
+    if (!bytes || bytes > SIZE_MAX || frames <= bytes / page) { return false; }
+    for (size_t i = 0; i < count; ++i) {
+        const auto &e = *entries[i];
+        if (e.type != LIMINE_MEMMAP_USABLE) { continue; }
+        const uint64_t first = first_frame(e.base), stop = (e.base + e.length) / page;
+        if (stop > first && stop - first >= bytes / page) {
+            storage = {first * page, static_cast<size_t>(bytes)};
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FrameAllocator::init(limine_memmap_entry *const *entries, size_t count, FrameStorage storage, void *mapping) {
+    allocated_ = nullptr;
+    region_count_ = cursor_ = 0;
+    storage_ = {};
+    detected_bytes_ = usable_bytes_ = managed_ = free_ = 0;
+    FrameStorage expected;
+    if (!mapping || !storage_plan(entries, count, expected) || storage.address != expected.address ||
+        storage.bytes != expected.bytes) { return false; }
+    allocated_ = static_cast<uint8_t *>(mapping);
+    storage_ = storage;
+    for (size_t i = 0; i < storage.bytes; ++i) { allocated_[i] = 0; }
     for (size_t i = 0; i < count; ++i) {
         const auto &e = *entries[i];
         if (e.type != LIMINE_MEMMAP_USABLE) { continue; }
         usable_bytes_ += e.length;
-        if (e.base >= LIMIT) { continue; }
-        const uint64_t last = e.base + e.length < LIMIT ? e.base + e.length : LIMIT;
-        const size_t first = static_cast<size_t>((e.base + PAGE_SIZE - 1) / PAGE_SIZE);
-        const size_t stop = static_cast<size_t>(last / PAGE_SIZE);
-        for (size_t frame = first ? first : 1; frame < stop; ++frame) {
-            set(eligible_, frame, true);
-            ++managed_;
+        const uint64_t first = first_frame(e.base), stop = (e.base + e.length) / page;
+        if (stop <= first) { continue; }
+        const size_t frames = static_cast<size_t>(stop - first);
+        regions_[region_count_++] = {first * page, static_cast<size_t>(managed_), frames};
+        if (storage.address >= first * page && storage.address < stop * page) {
+            const size_t index = static_cast<size_t>(managed_ + storage.address / page - first);
+            for (size_t n = 0; n < storage.bytes / page; ++n) { set(allocated_, index + n, true); }
         }
-        if (stop > end_) { end_ = stop; }
+        managed_ += frames;
     }
     // Count the union of firmware-described RAM, excluding ambiguous reserved/MMIO ranges.
     uint64_t covered = 0;
@@ -60,29 +101,62 @@ bool FrameAllocator::init(limine_memmap_entry *const *entries, size_t count) {
         if (stop > start) { detected_bytes_ += stop - start; }
         if (stop > covered) { covered = stop; }
     }
-    free_ = managed_;
-    return free_ != 0;
+    free_ = managed_ - storage.bytes / page;
+    return true;
 }
-uint64_t FrameAllocator::allocate() {
+
+uint64_t FrameAllocator::highest_address() const {
+    if (!region_count_) { return 0; }
+    const auto &region = regions_[region_count_ - 1];
+    return region.address + region.count * page;
+}
+
+uint64_t FrameAllocator::allocate(uint64_t minimum_address) {
     if (!free_) { return 0; }
-    for (size_t checked = 0; checked < end_ - 1; ++checked) {
-        const size_t frame = cursor_++;
-        if (cursor_ >= end_) { cursor_ = 1; }
-        if (bit(eligible_, frame) && !bit(allocated_, frame)) {
-            set(allocated_, frame, true);
-            --free_;
-            return frame * PAGE_SIZE;
+    const uint64_t minimum = first_frame(minimum_address);
+    size_t begin = static_cast<size_t>(managed_);
+    for (size_t r = 0; r < region_count_; ++r) {
+        const auto &region = regions_[r];
+        const uint64_t first = region.address / page;
+        if (minimum >= first + region.count) { continue; }
+        begin = region.first + static_cast<size_t>(minimum > first ? minimum - first : 0);
+        break;
+    }
+    if (begin == managed_) { return 0; }
+    size_t index = cursor_ >= begin ? cursor_ : begin;
+    for (size_t checked = 0; checked < managed_ - begin; ++checked) {
+        const size_t frame = index++;
+        if (index == managed_) { index = begin; }
+        if (bit(allocated_, frame)) { continue; }
+        set(allocated_, frame, true);
+        --free_;
+        cursor_ = index;
+        size_t low = 0, high = region_count_;
+        while (low + 1 < high) {
+            const size_t middle = low + (high - low) / 2;
+            if (regions_[middle].first <= frame) { low = middle; }
+            else { high = middle; }
         }
+        return regions_[low].address + (frame - regions_[low].first) * page;
     }
     return 0;
 }
 bool FrameAllocator::release(uint64_t address) {
-    if (!address || address >= LIMIT || address % PAGE_SIZE) { return false; }
-    const size_t frame = static_cast<size_t>(address / PAGE_SIZE);
-    if (!bit(eligible_, frame) || !bit(allocated_, frame)) { return false; }
-    set(allocated_, frame, false);
+    if (!address || address % page || !region_count_ ||
+        (address >= storage_.address && address - storage_.address < storage_.bytes)) { return false; }
+    size_t low = 0, high = region_count_;
+    while (low + 1 < high) {
+        const size_t middle = low + (high - low) / 2;
+        if (regions_[middle].address <= address) { low = middle; }
+        else { high = middle; }
+    }
+    const auto &region = regions_[low];
+    if (address < region.address || (address - region.address) / page >= region.count) { return false; }
+    const size_t index = region.first + static_cast<size_t>((address - region.address) / page);
+    if (!bit(allocated_, index)) { return false; }
+    set(allocated_, index, false);
     ++free_;
-    cursor_ = frame;
+    cursor_ = index;
     return true;
 }
 }

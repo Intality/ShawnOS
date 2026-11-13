@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise real PS/2 input and framebuffer output through QEMU's QMP API."""
 import argparse
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import os
@@ -68,12 +69,76 @@ def read_ppm(path):
     return width, height, pixels
 
 
+def memory_text(byte_count):
+    unit = (1 << 30) if byte_count >= (1 << 30) else (1 << 20)
+    value = (Decimal(byte_count) / Decimal(unit)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{value} {'GB' if unit == (1 << 30) else 'MB'}"
+
+
+def assert_memory_pixels(pixels, width, x, y, text, available=260,
+                         ink_color=bytes.fromhex("243531"), paper_color=bytes.fromhex("f5f8f6")):
+    # Exact 5x7 fixtures verify the visible value, not only its serial report.
+    glyphs = {
+        "0": [14,17,19,21,25,17,14], "1": [4,12,4,4,4,4,14],
+        "2": [14,17,1,2,4,8,31], "3": [30,1,1,14,1,1,30],
+        "4": [2,6,10,18,31,2,2], "5": [31,16,16,30,1,1,30],
+        "6": [6,8,16,30,17,17,14], "7": [31,1,2,4,8,8,8],
+        "8": [14,17,17,14,17,17,14], "9": [14,17,17,15,1,2,12],
+        "M": [17,27,21,21,17,17,17], "B": [30,17,17,30,17,17,30],
+        "G": [14,17,16,23,17,17,15], ".": [0,0,0,0,0,0,4], " ": [0]*7,
+        "A": [14,17,17,31,17,17,17], "D": [30,17,17,17,17,17,30],
+        "F": [31,16,16,30,16,16,16], "R": [30,17,17,30,20,18,17],
+        "U": [17,17,17,17,17,17,14], ":": [0,0,4,0,0,4,0],
+        "a": [0,0,14,1,15,17,15], "b": [16,16,30,17,17,17,30],
+        "c": [0,0,14,16,16,17,14], "d": [1,1,15,17,17,17,15],
+        "e": [0,0,14,17,31,16,14], "g": [0,15,17,17,15,1,14],
+        "l": [12,4,4,4,4,4,14], "n": [0,0,30,17,17,17,17],
+        "r": [0,0,22,25,16,16,16], "s": [0,0,15,16,14,1,30],
+        "t": [8,8,28,8,8,9,6],
+    }
+    scale = 1 if len(text) * 12 > available else 2
+    assert len(text) * 6 * scale <= available, f"Memory text does not fit: {text}"
+    for index, char in enumerate(text):
+        for row in range(7):
+            for col in range(6):
+                ink = col < 5 and glyphs[char][row] & (1 << (4 - col))
+                expected = ink_color if ink else paper_color
+                for dy in range(scale):
+                    for dx in range(scale):
+                        start = ((y + row * scale + dy) * width + x + (index * 6 + col) * scale + dx) * 3
+                        assert pixels[start:start + 3] == expected, f"Wrong visible memory text: {text}"
+
+
+def assert_terminal_memory_pixels(pixels, width, height, memory):
+    w, h = min(580, width - 120), min(350, height - 100)
+    x = max(0, min(width - w - 4, (width - w) // 2 + 32)) + 16
+    y = max(32, min(height - 48 - h - 4, (height - 48 - h) // 2 + 12)) + 50
+    lines = [f"{label}: {memory[label]['text']} "
+             for label in ("Detected RAM", "Usable RAM", "Managed RAM", "Free RAM")]
+    available = w - 32
+    assert all(len(line) * 12 <= available for line in lines), "Terminal memory text does not fit"
+    # Prior commands can scroll out of view; find the four consecutive mem rows.
+    for row in range((h - 72) // 20 - len(lines) + 1):
+        try:
+            for offset, line in enumerate(lines):
+                assert_memory_pixels(pixels, width, x, y + (row + offset) * 20, line, available,
+                                     ink_color=bytes.fromhex("d9e9df"), paper_color=bytes.fromhex("1d2926"))
+        except AssertionError:
+            continue
+        return
+    raise AssertionError(f"Missing visible Terminal memory rows: {lines}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("iso", nargs="?", default="build/myos-x86_64.iso")
     parser.add_argument("--output-dir", default="build/desktop-test")
     parser.add_argument("--expect-size", default="1024x768")
     parser.add_argument("--memory", default="256M")
+    parser.add_argument("--memory-no-reserve", action="store_true",
+                        help="Use on-demand QEMU test RAM without reserving host swap")
+    parser.add_argument("--require-capacity-test", action="store_true",
+                        help="Require an ISO booted with selftest=memory")
     parser.add_argument("--cpu", help="QEMU CPU model and properties for reporting tests")
     parser.add_argument("--expect-cpu-base", "--expect-cpu-speed", dest="expect_cpu_speed",
                         help="Expected formatted CPU speed, or Unavailable")
@@ -101,7 +166,9 @@ def main():
     import tempfile
     with tempfile.TemporaryDirectory(prefix="myos-qmp-") as temp, (output / "qemu.log").open("w") as error_log:
         process = subprocess.Popen([
-            "qemu-system-x86_64", "-M", "q35", "-m", args.memory,
+            "qemu-system-x86_64", "-M", "q35", "-smp", "1", "-m", args.memory,
+            *(["-object", f"memory-backend-ram,id=myos-test-ram,size={args.memory},reserve=off,prealloc=off",
+               "-machine", "memory-backend=myos-test-ram"] if args.memory_no_reserve else []),
             *(["-cpu", args.cpu] if args.cpu else []), "-cdrom", str(iso),
             "-machine", f"smbios-entry-point-type={args.smbios_entry_point}",
             *(["-smbios", f"type=4,current-speed={args.firmware_cpu_mhz},max-speed=5000"]
@@ -147,6 +214,26 @@ def main():
             wait_marker("MYOS: GDT IDT TSS ready")
             wait_marker("MYOS: memory map ready")
             wait_marker("MYOS: frame allocator self-test passed")
+            stats = re.search(r"MYOS: frame allocator ready managed=(\d+) metadata=(\d+) highest=(\d+)", log())
+            assert stats, "Missing allocator capacity diagnostics"
+            managed_frames, metadata_frames, highest = map(int, stats.groups())
+            assert 0 < metadata_frames < managed_frames
+            high = re.search(r"MYOS: high memory write/read passed first=(\d+) last=(\d+)", log())
+            high_memory = None
+            if highest > (1 << 32):
+                assert high, "No real high-memory read/write test"
+                high_first, high_last = map(int, high.groups())
+                assert (1 << 32) <= high_first <= high_last == highest - 4096
+                high_memory = {"first": high_first, "last": high_last}
+            capacity = re.search(r"MYOS: memory capacity passed allocated=(\d+) high=(\d+) released=(\d+)", log())
+            capacity_result = None
+            if args.require_capacity_test:
+                assert capacity, "Missing full-capacity exhaustion/recovery test"
+            if capacity:
+                allocated, high_count, released = map(int, capacity.groups())
+                assert allocated == released == managed_frames - metadata_frames
+                assert (high_count > 0) == (highest > (1 << 32))
+                capacity_result = {"allocated": allocated, "high": high_count, "released": released}
             wait_marker("MYOS: PIT ready 100 Hz")
             wait_marker("MYOS: timer ticked")
             wait_marker("MYOS: desktop ready")
@@ -227,6 +314,22 @@ def main():
             screenshot("cpu")
             type_text("mem\n")
             wait_marker("MYOS: command mem")
+            memory_reports = re.findall(r"^MYOS: memory (Detected RAM|Usable RAM|Managed RAM|Free RAM) bytes=(\d+) value=([^\r\n]+)",
+                                        log(), re.MULTILINE)
+            assert [entry[0] for entry in memory_reports] == ["Detected RAM", "Usable RAM", "Managed RAM", "Free RAM"], log()
+            memory = {label: {"bytes": int(raw), "text": text} for label, raw, text in memory_reports}
+            for report in memory.values():
+                assert report["text"] == memory_text(report["bytes"]), report
+            assert memory["Detected RAM"]["bytes"] >= memory["Usable RAM"]["bytes"] >= memory["Managed RAM"]["bytes"] >= memory["Free RAM"]["bytes"] > 0
+            assert memory["Managed RAM"]["bytes"] == managed_frames * 4096
+            assert memory["Usable RAM"]["bytes"] - managed_frames * 4096 < 4096 * 4096, "Usable RAM was left unmanaged"
+            assert memory["Free RAM"]["bytes"] <= (managed_frames - metadata_frames) * 4096
+            assert_terminal_memory_pixels(screenshot("memory-terminal")[2], width, height, memory)
+            key("f3")
+            about_memory = screenshot("memory-about")[2]
+            for label, offset in [("Detected RAM", 198), ("Free RAM", 222)]:
+                assert_memory_pixels(about_memory, width, about_x + 136, about_y + offset, memory[label]["text"])
+            key("f1")
             type_text("uptime\n")
             time.sleep(1.1)
             type_text("uptime\n")
@@ -291,10 +394,16 @@ def main():
             assert pixel(sky_before, width - 4, 50) != pixel(sky_after, width - 4, 50), "Wallpaper did not change"
             qmp.execute("quit")
             process.wait(timeout=10)
-            result = {"version": "0.3.1", "resolution": args.expect_size, "memory": args.memory, "result": "passed",
+            result = {"version": "0.3.1", "resolution": args.expect_size, "memory": args.memory, "cpus": 1, "result": "passed",
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
-                                 "frame allocator boot self-test", "live uptime", "memory command", "timer and HLT wake progress"],
+                                 "frame allocator boot self-test", "live uptime", "1024-based memory command",
+                                 "Terminal memory pixels", "About memory pixels", "timer and HLT wake progress"],
+                      "memory_reports": memory,
+                      "allocator": {"managed_frames": managed_frames, "metadata_frames": metadata_frames,
+                                    "highest_address": highest, "high_memory_write_read": high_memory,
+                                    "capacity_test": capacity_result},
+                      "memory_no_reserve": args.memory_no_reserve,
                       "cpu_model": args.cpu, "cpu_speed": cpu_speed, "cpu_speed_label": cpu_label,
                       "firmware_cpu_mhz": args.firmware_cpu_mhz, "smbios_entry_point": args.smbios_entry_point,
                       "iso_sha256": hashlib.sha256(iso.read_bytes()).hexdigest()}

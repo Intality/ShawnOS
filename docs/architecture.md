@@ -5,9 +5,13 @@
 1. Disable interrupts and initialize COM1 serial output.
 2. Check Limine base revision 6 and run freestanding global constructors.
 3. Install kernel-owned GDT, TSS, and all 256 IDT gates, leaving IRQs masked.
-4. Validate the Limine physical map and initialize physical frame bookkeeping.
+4. Validate the Limine physical map, reserve correctly sized frame bookkeeping
+   in usable RAM, and initialize the physical allocator through HHDM.
 5. Allocate two frames, access them through Limine's higher-half direct map,
    write/read distinct patterns, clear them, and return them to the allocator.
+   When high RAM exists, also access frames above 4 GiB and at the final usable
+   page. The exact `selftest=memory` argument additionally tests exhaustion and
+   recovery of every available frame before the desktop starts.
 6. Initialize the validated framebuffer desktop and polled PS/2 devices.
 7. Configure APIC LINT0 ExtINT virtual-wire delivery (or direct PIC delivery on
    a CPU without APIC), remap the PIC, program PIT channel 0, enable only IRQ0,
@@ -21,8 +25,14 @@ bootloader's reserved/reclaimable regions. They are not freed or reused.
 
 ## Physical Memory
 
-`FrameAllocator` stores two static bitmaps: one for eligible frames and one for
-outstanding allocations. Only `LIMINE_MEMMAP_USABLE` entries are eligible.
+`FrameAllocator` describes usable regions with compact bitmap offsets. It uses
+one allocation bit per usable page, rather than indexing holes in the physical
+address space. `storage_plan` validates the map, computes the page-rounded bitmap
+size, and selects a fully usable span to store it. Boot maps that span through
+Limine's HHDM before `init`. Those metadata frames are pinned, cannot be returned
+by allocation, and cannot be released by callers. A valid plan needs a contiguous
+usable span large enough for bookkeeping and at least one remaining free page.
+Only `LIMINE_MEMMAP_USABLE` entries are eligible.
 Physical address zero is deliberately excluded as the allocation-failure value.
 Only completely covered, 4 KiB aligned pages are eligible. Allocation returns a
 physical address, not a pointer; the boot self-test adds the reported HHDM offset
@@ -36,8 +46,13 @@ Misaligned, reserved, out-of-range, unallocated, and double releases fail withou
 changing the free count. Exhaustion returns zero. There is no heap or ownership
 tracking beyond outstanding frame allocation, and no contiguous allocation API.
 
-The managed address range is [4 KiB, 4 GiB). Reported usable bytes can include
-RAM above that ceiling, so `mem` reports usable, managed, and free RAM separately.
+There is no fixed 4 GiB address ceiling. Every completely covered usable page
+in the validated map is managed, including remapped RAM above PCI/MMIO holes.
+Managed RAM includes pinned metadata; free RAM excludes metadata and outstanding
+allocations. The bitmap grows with total usable RAM, not the highest physical
+address. `allocate(minimum_address)` can request a page at or above a physical
+address, without rounding down or changing free counts when that range is full.
+`mem` still reports detected, usable, managed, and free RAM separately.
 This implementation is single-CPU and called only from the main kernel context;
 neither the timer handler nor another CPU allocates frames.
 
@@ -91,8 +106,20 @@ implemented; reset starts a new session.
 ## Verification
 
 - Native unit tests exercise the actual allocator, including exhaustion, invalid
-  maps, reservations, reuse, and the 4 GiB boundary.
-- Boot checks read/write actual allocated pages through HHDM.
+  maps, reservations, reuse, the 4 GiB boundary, metadata protection, sparse
+  high-address maps, rounding near `UINT64_MAX`, and simulated capacities up to
+  32 GiB. Deterministic multi-region tests compare allocation with an independent
+  ordered list of eligible physical pages and guard the bitmap's bounds.
+- Boot checks read/write actual allocated pages through HHDM, including high
+  RAM and the highest usable frame. They restore the original free count.
+- `memory-test.py` builds an isolated `selftest=memory` ISO and exhausts/reclaims
+  every available frame at each requested capacity. Recovery walks the original
+  usable map independently and rejects a successful release of metadata. The
+  desktop test verifies the logged capacity counts, high-frame addresses, live
+  input, and exact About memory glyphs. Its default matrix covers 64 MiB through
+  16 GiB. QEMU uses `reserve=off,prealloc=off`; a Linux process-tree RSS monitor
+  stops a test above 1.5 GiB of actual resident host RAM. Only sampled physical
+  pages are touched, so this is not an exhaustive byte-level hardware RAM test.
 - Desktop tests verify live uptime pixels, advancing tick/idle counters, memory
   commands, and all v0.2 interactions at 1024x768/256 MiB and 640x480/128 MiB.
 - `panic-test.py` generates isolated ISOs with exact `selftest=ud2`,
@@ -121,11 +148,23 @@ process scheduling, and user-mode execution require separate verification.
 
 ## RAM and Clock Readings
 
+`memory_size_text` uses the explicitly chosen 1024-based RAM convention, with
+MB/GB labels (1,048,576 and 1,073,741,824 bytes respectively), not decimal SI units.
+It selects GB at 1,073,741,824 bytes and rounds half up to two decimal places.
+About and `mem` share this bounded, integer-only formatter. Only the remainder
+is scaled before rounding, and a carry is applied separately, avoiding overflow
+even for `UINT64_MAX`. Display formatting does not decide allocator capacity.
+Host tests cover zero, small values, the unit threshold, rounding carries, large
+counts, and display width. Desktop tests compare serial byte counts with an
+independent high-precision conversion and verify exact About memory glyph pixels.
+
 The detected-RAM count unions sorted firmware regions for usable, executable,
 bootloader-reclaimable, ACPI-reclaimable, and ACPI-NVS memory, without double
 counting overlaps. Reserved/MMIO, framebuffer, and bad-memory regions are excluded.
 It describes identified RAM, not an installed-DIMM capacity measurement. The count
-includes RAM above 4 GiB even though allocation remains limited below that address.
+includes RAM above 4 GiB, which is now also managed when marked usable. Firmware,
+kernel, and device reservations remain excluded from free memory, as does the
+allocator's page-rounded tracking storage.
 
 At boot, CPU identity and the maximum basic CPUID leaf are checked before reading
 Intel leaf 0x16's reported CPU base MHz. Only the defined low 16 bits of EAX are
