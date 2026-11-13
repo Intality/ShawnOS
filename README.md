@@ -302,10 +302,11 @@ Intel describes the brand-string frequency as the manufacturing-time base
 specification in its [frequency display advisory](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/processor-frequency-display-mismatch-windows-advisory.pdf).
 This fallback does not measure current execution speed or a configured cTDP point.
 
-The `cpu` command retains a separate TSC clock diagnostic, measured against a PIT
-channel 2 interval at boot and shown with `~`. The TSC reading is a clock-counter
-rate, not CPU execution speed or host speed.
-The separately labeled PIT / 100 Hz reading is the system timer frequency.
+About shows CPU speed, memory, and live uptime. The `cpu` and `uptime` commands
+show their results in Terminal and write the raw timing details to the serial log.
+The `cpu` diagnostic records the TSC counter rate calibrated at boot. The `uptime`
+diagnostic records elapsed seconds, timer ticks, and idle wakes. The boot log
+records the PIT tick rate.
 
 The [VirtualBox CPU reporting lab](docs/virtualbox-cpu-tests.md) runs the same ISO
 against different simulated CPU frequency reports, including the MHz/GHz boundary

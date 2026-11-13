@@ -85,7 +85,8 @@ def uptime_text(seconds):
 
 
 def assert_text_pixels(pixels, width, x, y, text, available=260,
-                       ink_color=bytes.fromhex("243531"), paper_color=bytes.fromhex("f5f8f6")):
+                       ink_color=bytes.fromhex("243531"), paper_color=bytes.fromhex("f5f8f6"),
+                       scale=None):
     # Exact 5x7 fixtures verify the visible value, not only its serial report.
     glyphs = {
         "0": [14,17,19,21,25,17,14], "1": [4,12,4,4,4,4,14],
@@ -96,8 +97,11 @@ def assert_text_pixels(pixels, width, x, y, text, available=260,
         "M": [17,27,21,21,17,17,17], "B": [30,17,17,30,17,17,30],
         "G": [14,17,16,23,17,17,15], ".": [0,0,0,0,0,0,4], " ": [0]*7,
         "A": [14,17,17,31,17,17,17], "D": [30,17,17,17,17,17,30],
+        "C": [14,17,16,16,16,17,14], "H": [17,17,17,31,17,17,17],
         "F": [31,16,16,30,16,16,16], "R": [30,17,17,30,20,18,17],
+        "P": [30,17,17,30,16,16,16], "V": [17,17,17,17,17,10,4],
         "U": [17,17,17,17,17,17,14], ":": [0,0,4,0,0,4,0],
+        ">": [0,8,4,2,4,8,0],
         "a": [0,0,14,1,15,17,15], "b": [16,16,30,17,17,17,30],
         "c": [0,0,14,16,16,17,14], "d": [1,1,15,17,17,17,15],
         "e": [0,0,14,17,31,16,14], "g": [0,15,17,17,15,1,14],
@@ -105,9 +109,11 @@ def assert_text_pixels(pixels, width, x, y, text, available=260,
         "l": [12,4,4,4,4,4,14], "n": [0,0,30,17,17,17,17],
         "m": [0,0,26,21,21,21,21], "p": [0,0,30,17,30,16,16],
         "r": [0,0,22,25,16,16,16], "s": [0,0,15,16,14,1,30],
-        "t": [8,8,28,8,8,9,6],
+        "t": [8,8,28,8,8,9,6], "o": [0,0,14,17,17,17,14],
+        "v": [0,0,17,17,17,10,4], "z": [0,0,31,2,4,8,31],
     }
-    scale = 1 if len(text) * 12 > available else 2
+    if scale is None:
+        scale = 1 if len(text) * 12 > available else 2
     assert len(text) * 6 * scale <= available, f"Text does not fit: {text}"
     for index, char in enumerate(text):
         for row in range(7):
@@ -120,7 +126,7 @@ def assert_text_pixels(pixels, width, x, y, text, available=260,
                         assert pixels[start:start + 3] == expected, f"Wrong visible text: {text}"
 
 
-def assert_terminal_rows(pixels, width, height, lines):
+def assert_terminal_rows(pixels, width, height, lines, *, ends_at_prompt=False):
     w, h = min(580, width - 120), min(350, height - 100)
     x = max(0, min(width - w - 4, (width - w) // 2 + 32)) + 16
     y = max(32, min(height - 48 - h - 4, (height - 48 - h) // 2 + 12)) + 50
@@ -133,6 +139,9 @@ def assert_terminal_rows(pixels, width, height, lines):
             for offset, line in enumerate(lines):
                 assert_text_pixels(pixels, width, x, y + (row + offset) * 20, line, available,
                                    ink_color=bytes.fromhex("d9e9df"), paper_color=bytes.fromhex("1d2926"))
+            if ends_at_prompt:
+                assert_text_pixels(pixels, width, x, y + (row + len(lines)) * 20, "> ", available,
+                                   ink_color=bytes.fromhex("9be2c1"), paper_color=bytes.fromhex("1d2926"))
         except AssertionError:
             continue
         return
@@ -326,7 +335,9 @@ def main():
                 assert cpu_speed == args.expect_cpu_speed, (cpu_speed, args.expect_cpu_speed)
             if args.expect_cpu_label is not None:
                 assert cpu_label == args.expect_cpu_label, (cpu_label, args.expect_cpu_label)
-            screenshot("cpu")
+            assert re.search(r"(?m)^MYOS: TSC clock: (?:~[1-9]\d* MHz|unavailable)\r?$", log()), log()
+            assert_terminal_rows(screenshot("cpu")[2], width, height, [f"{cpu_label}: {cpu_speed}"],
+                                 ends_at_prompt=True)
             type_text("mem\n")
             wait_marker("MYOS: command mem")
             memory_reports = re.findall(r"^MYOS: memory (Detected RAM|Usable RAM|Managed RAM|Free RAM) bytes=(\d+) value=([^\r\n]+)",
@@ -343,6 +354,12 @@ def main():
             assert_terminal_rows(screenshot("memory-terminal")[2], width, height, memory_lines)
             key("f3")
             about_memory = screenshot("memory-about")[2]
+            muted = bytes.fromhex("61736d")
+            assert_text_pixels(about_memory, width, about_x + 92, about_y + 94, "Version 0.3.1 ", ink_color=muted)
+            for label, offset in [(cpu_label, 174), ("Uptime", 246)]:
+                assert_text_pixels(about_memory, width, about_x + 24, about_y + offset, label + " ",
+                                   ink_color=muted, scale=1)
+            assert_text_pixels(about_memory, width, about_x + 136, about_y + 174, cpu_speed + " ")
             for label, offset in [("Detected RAM", 198), ("Free RAM", 222)]:
                 assert_text_pixels(about_memory, width, about_x + 136, about_y + offset, memory[label]["text"])
             key("f1")
@@ -359,9 +376,10 @@ def main():
             assert len(uptime_samples) == 2, log()
             first, second = [tuple(map(int, sample)) for sample in uptime_samples]
             assert second[0] > first[0] and second[1] > first[1] and second[2] > first[2] > 0, "Timer or idle did not progress"
-            assert_terminal_rows(screenshot("system-info")[2], width, height, [f"Uptime: {uptime_text(second[0])}"])
-            about_before = visible_uptime(uptime_before, width, about_x + 136, about_y + 270, first[0], second[0])
-            about_after = visible_uptime(uptime_after, width, about_x + 136, about_y + 270, first[0], second[0])
+            assert_terminal_rows(screenshot("system-info")[2], width, height, [f"Uptime: {uptime_text(second[0])}"],
+                                 ends_at_prompt=True)
+            about_before = visible_uptime(uptime_before, width, about_x + 136, about_y + 246, first[0], second[0])
+            about_after = visible_uptime(uptime_after, width, about_x + 136, about_y + 246, first[0], second[0])
             assert about_after > about_before, "About uptime did not refresh"
             key("f2")
             wait_marker("MYOS: open Notes")
@@ -423,6 +441,7 @@ def main():
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
                                  "frame allocator boot self-test", "live uptime", "formatted About and Terminal uptime",
+                                 "About system information", "timer details in serial only",
                                  "1024-based memory command",
                                  "Terminal memory pixels", "About memory pixels", "timer and HLT wake progress"],
                       "memory_reports": memory,

@@ -187,8 +187,8 @@ Polling has a finite iteration cap and computation between port reads. A
 stuck channel 2 produces a panic. Sustained IRQ0 delivery is verified by the
 automated desktop and repeated-boot tests, after entering the real idle loop.
 The kernel does not yet have an independent runtime interrupt watchdog; loss
-of IRQ0 delivery can still stall an idle CPU. This boot estimate is labeled TSC
-clock in the diagnostic `cpu` command and is never used as CPU base speed.
+of IRQ0 delivery can still stall an idle CPU. The `cpu` command writes this
+boot estimate to the serial log as `TSC clock`.
 
 About and `cpu` share a bounded integer-only formatter for CPU speed. Values
 below 1,000 MHz use MHz; values at or above that threshold use GHz rounded to two
