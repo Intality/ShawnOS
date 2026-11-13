@@ -75,8 +75,17 @@ def memory_text(byte_count):
     return f"{value} {'GB' if unit == (1 << 30) else 'MB'}"
 
 
-def assert_memory_pixels(pixels, width, x, y, text, available=260,
-                         ink_color=bytes.fromhex("243531"), paper_color=bytes.fromhex("f5f8f6")):
+def uptime_text(seconds):
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    units = list(zip((days, hours, minutes, seconds), "dhms"))
+    first = next((i for i, (value, _) in enumerate(units) if value), 3)
+    return " ".join(f"{value}{unit}" for value, unit in units[first:])
+
+
+def assert_text_pixels(pixels, width, x, y, text, available=260,
+                       ink_color=bytes.fromhex("243531"), paper_color=bytes.fromhex("f5f8f6")):
     # Exact 5x7 fixtures verify the visible value, not only its serial report.
     glyphs = {
         "0": [14,17,19,21,25,17,14], "1": [4,12,4,4,4,4,14],
@@ -92,12 +101,14 @@ def assert_memory_pixels(pixels, width, x, y, text, available=260,
         "a": [0,0,14,1,15,17,15], "b": [16,16,30,17,17,17,30],
         "c": [0,0,14,16,16,17,14], "d": [1,1,15,17,17,17,15],
         "e": [0,0,14,17,31,16,14], "g": [0,15,17,17,15,1,14],
+        "h": [16,16,30,17,17,17,17], "i": [4,0,12,4,4,4,14],
         "l": [12,4,4,4,4,4,14], "n": [0,0,30,17,17,17,17],
+        "m": [0,0,26,21,21,21,21], "p": [0,0,30,17,30,16,16],
         "r": [0,0,22,25,16,16,16], "s": [0,0,15,16,14,1,30],
         "t": [8,8,28,8,8,9,6],
     }
     scale = 1 if len(text) * 12 > available else 2
-    assert len(text) * 6 * scale <= available, f"Memory text does not fit: {text}"
+    assert len(text) * 6 * scale <= available, f"Text does not fit: {text}"
     for index, char in enumerate(text):
         for row in range(7):
             for col in range(6):
@@ -106,27 +117,36 @@ def assert_memory_pixels(pixels, width, x, y, text, available=260,
                 for dy in range(scale):
                     for dx in range(scale):
                         start = ((y + row * scale + dy) * width + x + (index * 6 + col) * scale + dx) * 3
-                        assert pixels[start:start + 3] == expected, f"Wrong visible memory text: {text}"
+                        assert pixels[start:start + 3] == expected, f"Wrong visible text: {text}"
 
 
-def assert_terminal_memory_pixels(pixels, width, height, memory):
+def assert_terminal_rows(pixels, width, height, lines):
     w, h = min(580, width - 120), min(350, height - 100)
     x = max(0, min(width - w - 4, (width - w) // 2 + 32)) + 16
     y = max(32, min(height - 48 - h - 4, (height - 48 - h) // 2 + 12)) + 50
-    lines = [f"{label}: {memory[label]['text']} "
-             for label in ("Detected RAM", "Usable RAM", "Managed RAM", "Free RAM")]
+    lines = [line + " " for line in lines]
     available = w - 32
-    assert all(len(line) * 12 <= available for line in lines), "Terminal memory text does not fit"
-    # Prior commands can scroll out of view; find the four consecutive mem rows.
+    assert all(len(line) * 12 <= available for line in lines), "Terminal text does not fit"
+    # Prior commands can scroll out of view; find the expected consecutive rows.
     for row in range((h - 72) // 20 - len(lines) + 1):
         try:
             for offset, line in enumerate(lines):
-                assert_memory_pixels(pixels, width, x, y + (row + offset) * 20, line, available,
-                                     ink_color=bytes.fromhex("d9e9df"), paper_color=bytes.fromhex("1d2926"))
+                assert_text_pixels(pixels, width, x, y + (row + offset) * 20, line, available,
+                                   ink_color=bytes.fromhex("d9e9df"), paper_color=bytes.fromhex("1d2926"))
         except AssertionError:
             continue
         return
-    raise AssertionError(f"Missing visible Terminal memory rows: {lines}")
+    raise AssertionError(f"Missing visible Terminal rows: {lines}")
+
+
+def visible_uptime(pixels, width, x, y, first, last):
+    for seconds in range(first, last + 1):
+        try:
+            assert_text_pixels(pixels, width, x, y, uptime_text(seconds) + " ")
+        except AssertionError:
+            continue
+        return seconds
+    raise AssertionError(f"About did not display formatted uptime between {first}s and {last}s")
 
 
 def main():
@@ -259,11 +279,6 @@ def main():
 
             about_x = (width - 420) // 2
             about_y = max(32, min(height - 48 - 300 - 4, (height - 48 - 300) // 2 + 12))
-            uptime_before = screenshot("uptime-before")[2]
-            time.sleep(1.2)
-            uptime_after = screenshot("uptime-after")[2]
-            assert region(uptime_before, about_x + 136, about_y + 270, 180, 16) != region(
-                uptime_after, about_x + 136, about_y + 270, 180, 16), "Uptime did not refresh"
 
             def move_to(x, y):
                 while position != [x, y]:
@@ -324,20 +339,30 @@ def main():
             assert memory["Managed RAM"]["bytes"] == managed_frames * 4096
             assert memory["Usable RAM"]["bytes"] - managed_frames * 4096 < 4096 * 4096, "Usable RAM was left unmanaged"
             assert memory["Free RAM"]["bytes"] <= (managed_frames - metadata_frames) * 4096
-            assert_terminal_memory_pixels(screenshot("memory-terminal")[2], width, height, memory)
+            memory_lines = [f"{label}: {item['text']}" for label, item in memory.items()]
+            assert_terminal_rows(screenshot("memory-terminal")[2], width, height, memory_lines)
             key("f3")
             about_memory = screenshot("memory-about")[2]
             for label, offset in [("Detected RAM", 198), ("Free RAM", 222)]:
-                assert_memory_pixels(about_memory, width, about_x + 136, about_y + offset, memory[label]["text"])
+                assert_text_pixels(about_memory, width, about_x + 136, about_y + offset, memory[label]["text"])
             key("f1")
             type_text("uptime\n")
-            time.sleep(1.1)
+            wait_marker("MYOS: uptime seconds=")
+            key("f3")
+            uptime_before = screenshot("uptime-before")[2]
+            time.sleep(1.2)
+            uptime_after = screenshot("uptime-after")[2]
+            key("f1")
             type_text("uptime\n")
+            wait_marker("MYOS: uptime seconds=", 2)
             uptime_samples = re.findall(r"MYOS: uptime seconds=(\d+) ticks=(\d+) idle=(\d+)", log())
             assert len(uptime_samples) == 2, log()
             first, second = [tuple(map(int, sample)) for sample in uptime_samples]
             assert second[0] > first[0] and second[1] > first[1] and second[2] > first[2] > 0, "Timer or idle did not progress"
-            screenshot("system-info")
+            assert_terminal_rows(screenshot("system-info")[2], width, height, [f"Uptime: {uptime_text(second[0])}"])
+            about_before = visible_uptime(uptime_before, width, about_x + 136, about_y + 270, first[0], second[0])
+            about_after = visible_uptime(uptime_after, width, about_x + 136, about_y + 270, first[0], second[0])
+            assert about_after > about_before, "About uptime did not refresh"
             key("f2")
             wait_marker("MYOS: open Notes")
             print("Terminal passed; checking Notes and window controls.", flush=True)
@@ -397,9 +422,12 @@ def main():
             result = {"version": "0.3.1", "resolution": args.expect_size, "memory": args.memory, "cpus": 1, "result": "passed",
                       "checks": ["desktop pixels", "taskbar hover", "PS/2 mouse launch", "terminal commands", "typing",
                                  "backspace", "session note retention", "minimize and restore", "drag", "close", "launcher", "wallpaper",
-                                 "frame allocator boot self-test", "live uptime", "1024-based memory command",
+                                 "frame allocator boot self-test", "live uptime", "formatted About and Terminal uptime",
+                                 "1024-based memory command",
                                  "Terminal memory pixels", "About memory pixels", "timer and HLT wake progress"],
                       "memory_reports": memory,
+                      "uptime": {"about_seconds": [about_before, about_after], "terminal_seconds": second[0],
+                                 "terminal_text": uptime_text(second[0])},
                       "allocator": {"managed_frames": managed_frames, "metadata_frames": metadata_frames,
                                     "highest_address": highest, "high_memory_write_read": high_memory,
                                     "capacity_test": capacity_result},
