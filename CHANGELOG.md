@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.0 - Readable System Information (2026-11-13)
+
+- Show CPU base speed or firmware-reported startup speed in MHz or GHz.
+- Show detected, usable, managed, and free RAM in familiar MB and GB units.
+- Manage usable RAM above 4 GiB as well as below it. The allocator excludes
+  reserved ranges and its own metadata.
+- Show live uptime in days, hours, minutes, and seconds in About and Terminal.
+- Keep timer frequencies and counters in serial diagnostics and simplify About.
+- Extend CPU, memory, desktop, and timer checks in QEMU and verify the
+  desktop in Windows VirtualBox with one CPU and 64 MB of assigned RAM.
+
 ## v0.3.1 - VirtualBox Timer Compatibility (2026-10-11)
 
 - Keep the local APIC enabled and configure LINT0 ExtINT virtual-wire delivery

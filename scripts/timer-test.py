@@ -70,7 +70,7 @@ def main():
                         time.sleep(0.1)
 
                 wait("MYOS: " + route)
-                wait("MYOS: boot ok v0.3.1")
+                wait("MYOS: boot ok v0.4.0")
                 wait("MYOS: timer ticked")
                 if name == "spurious":
                     wait("MYOS: APIC spurious self-test passed")
@@ -117,7 +117,7 @@ def main():
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
-    (output / "result.json").write_text(json.dumps({"version": "0.3.1", "checks": results}, indent=2) + "\n")
+    (output / "result.json").write_text(json.dumps({"version": "0.4.0", "checks": results}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

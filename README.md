@@ -2,7 +2,7 @@
 
 ShawnOS is a small independent 64-bit x86-64 operating system written in
 freestanding C++. It is not Debian, not Linux, and not a repackaged distro. The
-v0.3.1 kernel boots through Limine into an interactive framebuffer desktop.
+v0.4.0 kernel boots through Limine into an interactive framebuffer desktop.
 
 Repository: [Intality/ShawnOS](https://github.com/Intality/ShawnOS). Kernel and
 artifact filenames retain the original temporary MyOS name for compatibility.

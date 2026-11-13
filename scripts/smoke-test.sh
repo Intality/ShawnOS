@@ -47,7 +47,7 @@ timeout "${boot_timeout}s" qemu-system-x86_64 \
 qemu_pid=$!
 
 while kill -0 "$qemu_pid" 2>/dev/null; do
-    if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.3.1' "$log" && grep -q 'MYOS: timer ticked' "$log" && grep -q 'MYOS: frame allocator self-test passed' "$log"; then
+    if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.4.0' "$log" && grep -q 'MYOS: timer ticked' "$log" && grep -q 'MYOS: frame allocator self-test passed' "$log"; then
         printf 'Smoke test passed: desktop, allocator, and timer are live.\n'
         exit 0
     fi
@@ -64,7 +64,7 @@ if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     exit "$status"
 fi
 
-if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.3.1' "$log" && grep -q 'MYOS: timer ticked' "$log" && grep -q 'MYOS: frame allocator self-test passed' "$log"; then
+if [ -f "$log" ] && grep -q 'MYOS: boot ok v0.4.0' "$log" && grep -q 'MYOS: timer ticked' "$log" && grep -q 'MYOS: frame allocator self-test passed' "$log"; then
     printf 'Smoke test passed: desktop, allocator, and timer are live.\n'
 else
     printf 'Smoke test failed: kernel, allocator, or timer marker missing.\n' >&2
