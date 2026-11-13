@@ -6,6 +6,7 @@
 #include <myos/text_buffer.hpp>
 #include <myos/memory.hpp>
 #include <myos/memory_format.hpp>
+#include <myos/uptime_format.hpp>
 #include <myos/cpu.hpp>
 #include <myos/smbios.hpp>
 #include <cstring>
@@ -270,6 +271,23 @@ void memory_format_tests() {
     }
 }
 
+void uptime_format_tests() {
+    const struct { uint64_t seconds; const char *expected; } cases[] = {
+        {0, "0s"}, {1, "1s"}, {59, "59s"}, {60, "1m 0s"},
+        {3599, "59m 59s"}, {3600, "1h 0m 0s"}, {86399, "23h 59m 59s"},
+        {86400, "1d 0h 0m 0s"}, {45123, "12h 32m 3s"}, {90061, "1d 1h 1m 1s"},
+        {365ull * 86400, "365d 0h 0m 0s"},
+        {UINT64_MAX, "213503982334601d 7h 0m 15s"},
+    };
+    for (const auto &test : cases) {
+        const auto text = uptime_text(test.seconds);
+        assert(std::strcmp(text.data, test.expected) == 0);
+        assert(text.size == std::strlen(test.expected) && text.data[text.size] == 0);
+        assert(text_width(text.data, 1) <= 260); // About can reduce the scale for long uptimes.
+        assert(text_width("Uptime: ") + text_width(text.data) <= 488); // Narrowest Terminal.
+    }
+}
+
 void cpu_tests() {
     using namespace myos;
     const CpuIdRegisters intel{0x16, 0x756e6547, 0x6c65746e, 0x49656e69};
@@ -479,10 +497,11 @@ void smbios_tests() {
 
 int main() {
     memory_format_tests();
+    uptime_format_tests();
     cpu_tests();
     smbios_tests();
     keyboard_tests(); mouse_tests(); text_tests();
     graphics_tests(640, 480); graphics_tests(1024, 768); graphics_tests(1920, 1200);
     memory_tests();
-    std::puts("Host tests passed: memory display, CPU reporting, input, text, graphics, and physical frame allocation.");
+    std::puts("Host tests passed: memory display, uptime, CPU reporting, input, text, graphics, and physical frame allocation.");
 }

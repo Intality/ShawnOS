@@ -19,7 +19,7 @@ artifact filenames retain the original temporary MyOS name for compatibility.
 - Terminal with `help`, `clear`, `version`, `echo`, `about`, `notes`, `wallpaper`, `mem`, `uptime`, and `cpu`.
 - Notes editor with typing, newline, backspace, wrapping, and session retention.
 - About and Appearance apps; Alpine and Dusk wallpaper choices.
-- Live uptime and free-memory readings in About; `mem` and `uptime` commands.
+- Live uptime and free-memory readings in About; `mem` and `uptime` commands. About and Terminal display elapsed uptime as days, hours, minutes, and seconds (for example, `1d 1h 1m 1s`), omitting leading zero units.
 - Kernel-owned GDT, IDT, and TSS with emergency exception stacks.
 - CPU exception diagnostics and a framebuffer panic screen.
 - Validated physical memory map and a tested 4 KiB frame allocator.

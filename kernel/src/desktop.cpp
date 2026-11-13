@@ -5,6 +5,7 @@
 #include <myos/text_buffer.hpp>
 #include <myos/memory.hpp>
 #include <myos/memory_format.hpp>
+#include <myos/uptime_format.hpp>
 #include <myos/runtime.hpp>
 #include <myos/cpu.hpp>
 
@@ -227,11 +228,18 @@ void execute_command() {
         serial_write_line("MYOS: command cpu");
     } else if (equal(command, "uptime")) {
         const uint64_t ticks = timer_ticks();
-        terminal_stat("Uptime: ", ticks / TIMER_HZ, " seconds");
+        const uint64_t seconds = ticks / TIMER_HZ;
+        const auto uptime = uptime_text(seconds);
+        TextBuffer<48> line;
+        const char *parts[] = {"Uptime: ", uptime.data};
+        for (const char *part : parts) {
+            while (*part) { line.append(*part++); }
+        }
+        terminal_line(line.data);
         terminal_stat("Timer ticks: ", ticks, "");
         terminal_stat("Idle wakes: ", idle_wakes(), "");
         char digits[21];
-        serial_write("MYOS: uptime seconds="); number(ticks / TIMER_HZ, digits); serial_write(digits);
+        serial_write("MYOS: uptime seconds="); number(seconds, digits); serial_write(digits);
         serial_write(" ticks="); number(ticks, digits); serial_write(digits);
         serial_write(" idle="); number(idle_wakes(), digits); serial_write_line(digits);
     } else if (equal(command, "wallpaper")) {
@@ -299,11 +307,9 @@ void paint_note(Rect r) {
 void paint_about_uptime(Rect r) {
     const Rect band = {r.x + 136, r.y + 270, r.w - 160, 20};
     canvas.rect(band, PAPER);
-    const uint64_t seconds = timer_ticks() / TIMER_HZ;
-    char text[21]; number(seconds, text);
-    const int scale = text_width(text) + 96 > band.w ? 1 : 2;
-    canvas.text(text, band.x, band.y, INK, scale, band.w);
-    canvas.text(seconds == 1 ? "second" : "seconds", band.x + text_width(text, scale) + 12, band.y, MUTED, scale);
+    const auto text = uptime_text(timer_ticks() / TIMER_HZ);
+    const int scale = text_width(text.data) > band.w ? 1 : 2;
+    canvas.text(text.data, band.x, band.y, INK, scale, band.w);
 }
 void paint_about(Rect r) {
     icon(About, r.x + 24, r.y + 62, 48);
@@ -323,6 +329,7 @@ void paint_about(Rect r) {
         canvas.text(values[i], r.x + 136, y, INK, scale, r.w - 160);
 
     }
+    canvas.text("Uptime", r.x + 24, r.y + 270, MUTED, 1);
     paint_about_uptime(r);
 }
 Rect swatch(Rect r, int style) {
